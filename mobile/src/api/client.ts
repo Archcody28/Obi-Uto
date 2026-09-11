@@ -1,12 +1,10 @@
 import axios from "axios";
 import { useAuthStore } from "../store/authStore";
-
-const API_URL =
-  "http://192.168.42.43:5000/api";
+import { API_BASE_URL } from "../config";
 
 export const api =
   axios.create({
-    baseURL: API_URL,
+    baseURL: API_BASE_URL,
   });
 
 // Attach token from authStore to every request

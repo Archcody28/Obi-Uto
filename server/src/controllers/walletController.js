@@ -7,6 +7,9 @@ const Withdrawal =
 const Transaction =
   require("../models/Transaction");
 
+const Creator =
+  require("../models/Creator");
+
 /* GET WALLET */
 
 const getWallet =
@@ -40,20 +43,59 @@ const getWallet =
 const requestWithdrawal =
   async (req, res) => {
     try {
-      const {
-        creatorId,
-        amount,
-      } = req.body;
+      const { amount } = req.body;
+
+      // Verify the authenticated user owns a creator profile
+      const creator =
+        await Creator.findOne({
+          userId: req.user.id,
+        });
+
+      if (!creator) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Only creators can request withdrawals",
+          });
+      }
+
+      // Validate amount
+      const withdrawalAmount =
+        Number(amount);
+
+      if (
+        isNaN(withdrawalAmount) ||
+        !isFinite(withdrawalAmount) ||
+        withdrawalAmount <= 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            message:
+              "Amount must be a positive number",
+          });
+      }
+
+      if (withdrawalAmount > 1000000000) {
+        return res
+          .status(400)
+          .json({
+            message:
+              "Amount exceeds maximum allowed value",
+          });
+      }
 
       const wallet =
         await Wallet.findOne({
-          creatorId,
+          creatorId:
+            creator._id,
         });
 
       if (
         !wallet ||
         wallet.balance <
-          amount
+          withdrawalAmount
       ) {
         return res
           .status(400)
@@ -64,21 +106,25 @@ const requestWithdrawal =
       }
 
       wallet.balance -=
-        amount;
+        withdrawalAmount;
 
       await wallet.save();
 
       await Withdrawal.create(
         {
-          creatorId,
-          amount,
+          creatorId:
+            creator._id,
+          amount:
+            withdrawalAmount,
         }
       );
 
       await Transaction.create(
         {
-          creatorId,
-          amount,
+          creatorId:
+            creator._id,
+          amount:
+            withdrawalAmount,
           type:
             "withdrawal",
           description:
