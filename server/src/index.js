@@ -1,4 +1,30 @@
 require("dotenv").config();
+
+// Validate required environment variables before starting
+const requiredEnvVars = [
+  "MONGO_URI",
+  "JWT_SECRET",
+];
+
+const missingVars = requiredEnvVars.filter(
+  (v) => !process.env[v] || process.env[v].trim() === ""
+);
+
+if (missingVars.length > 0) {
+  console.error(
+    "FATAL: Missing required environment variables: " +
+      missingVars.join(", ")
+  );
+  process.exit(1);
+}
+
+// Warn about recommended but optional variables
+if (!process.env.PAYSTACK_SECRET_KEY) {
+  console.warn(
+    "WARNING: PAYSTACK_SECRET_KEY not set. Payment features will not work."
+  );
+}
+
 require("./jobs/subscriptionJob");
 require("./jobs/payoutJob");
 require("./jobs/trendingJob");
@@ -149,6 +175,14 @@ app.use("/api/creator-analytics", creatorAnalyticsRoutes);
 app.use("/api/business", businessRoutes);
 app.use("/api/kpi", kpiRoutes);
 app.use("/api/recommendations-v2", recommendationV2Routes);
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
+
 app.get("/", (req, res) => {
   res.json({
     message: "Media Streaming API Running",
@@ -195,4 +229,44 @@ server.listen(
       `Server running on ${PORT}`
     );
   }
+);
+
+// Graceful shutdown
+function shutdown(signal) {
+  console.log(
+    `${signal} received. Shutting down gracefully...`
+  );
+
+  server.close(() => {
+    console.log("HTTP server closed");
+
+    const mongoose =
+      require("mongoose");
+
+    mongoose.connection.close(
+      false,
+      () => {
+        console.log(
+          "MongoDB connection closed"
+        );
+        process.exit(0);
+      }
+    );
+
+    // Force exit after 10 seconds
+    setTimeout(() => {
+      console.error(
+        "Forced shutdown after timeout"
+      );
+      process.exit(1);
+    }, 10000);
+  });
+}
+
+process.on("SIGTERM", () =>
+  shutdown("SIGTERM")
+);
+
+process.on("SIGINT", () =>
+  shutdown("SIGINT")
 );

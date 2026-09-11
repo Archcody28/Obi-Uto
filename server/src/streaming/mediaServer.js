@@ -23,12 +23,12 @@ const config = {
   http: {
     port: 8000,
     mediaroot: "./media",
-    allow_origin: "*",
+    allow_origin: process.env.NODE_ENV === "production" ? (process.env.ALLOWED_ORIGINS || "").split(",")[0] || "" : "*",
   },
 
   trans: {
     ffmpeg:
-      "C:/ffmpeg/bin/ffmpeg.exe",
+      process.env.FFMPEG_PATH || "C:/ffmpeg/bin/ffmpeg.exe",
 
    tasks: [
   {
@@ -75,8 +75,7 @@ nms.on(
           startedAt:
             new Date(),
 
-          playbackUrl:
-            `http://192.168.42.43:8000/live/${streamKey}/index.m3u8`,
+          playbackUrl: `${process.env.MEDIA_BASE_URL || "http://192.168.42.43:8000"}/live/${streamKey}/index.m3u8`,
         }
       );
 
