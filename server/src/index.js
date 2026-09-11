@@ -97,7 +97,17 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+// Skip express.json() for webhook route (needs raw body for signature verification)
+app.use((req, res, next) => {
+  if (
+    req.path === "/api/payments/webhook" ||
+    req.path === "/webhook"
+  ) {
+    next();
+  } else {
+    express.json()(req, res, next);
+  }
+});
 
 // Apply rate limiting to sensitive routes
 app.use("/api/auth", authLimiter);
