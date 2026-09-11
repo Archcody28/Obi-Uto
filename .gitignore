@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+.env
+*.log
+.DS_Store
+build/
+dist/
+UsersADMINDesktopObi-Uto/
