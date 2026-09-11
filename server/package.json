@@ -1,0 +1,35 @@
+{
+  "name": "media-app-server",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "seed": "node src/utils/seedMedia.js",
+    "start": "node src/index.js",
+    "seed-plans": "node src/utils/seedPlans.js"
+  },
+  "dependencies": {
+    "axios": "^1.18.0",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.0",
+    "expo-server-sdk": "^6.1.0",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.15.0",
+    "multer": "^2.1.1",
+    "node-cron": "^4.5.0",
+    "node-media-server": "^4.2.8",
+    "socket.io": "^4.8.3",
+    "streamifier": "^0.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "description": "",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
