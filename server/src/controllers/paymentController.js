@@ -359,3 +359,220 @@ exports.verifyCheckout =
       });
     }
   };
+/*
+ PAYSTACK WEBHOOK
+*/
+
+exports.handleWebhook =
+  async (req, res) => {
+    try {
+      // Verify webhook signature
+      const signature =
+        req.headers[
+          "x-paystack-signature"
+        ];
+
+      if (!signature) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Missing signature",
+          });
+      }
+
+      const hash =
+        require("crypto")
+          .createHmac(
+            "sha512",
+            process.env.PAYSTACK_SECRET_KEY
+          )
+          .update(
+            JSON.stringify(req.body)
+          )
+          .digest("hex");
+
+      if (hash !== signature) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Invalid signature",
+          });
+      }
+
+      const event = req.body;
+
+      // Only process successful charge events
+      if (
+        event.event !==
+        "charge.success"
+      ) {
+        return res
+          .status(200)
+          .json({
+            received: true,
+          });
+      }
+
+      const {
+        reference,
+        status,
+        amount,
+      } = event.data;
+
+      if (
+        status !== "success" ||
+        !reference
+      ) {
+        return res
+          .status(200)
+          .json({
+            received: true,
+          });
+      }
+
+      // Find the payment record
+      const payment =
+        await Payment.findOne({
+          reference,
+        });
+
+      if (!payment) {
+        return res
+          .status(404)
+          .json({
+            error:
+              "Payment not found",
+          });
+      }
+
+      // Idempotency: already processed
+      if (
+        payment.status ===
+        "success"
+      ) {
+        return res
+          .status(200)
+          .json({
+            received: true,
+          });
+      }
+
+      // Verify amount matches
+      // Paystack returns amount in kobo
+      if (
+        amount !==
+        payment.amount * 100
+      ) {
+        payment.status = "failed";
+        await payment.save();
+
+        return res
+          .status(200)
+          .json({
+            received: true,
+          });
+      }
+
+      // Mark payment as successful
+      payment.status = "success";
+      payment.gateway =
+        "paystack-webhook";
+
+      await payment.save();
+
+      /*
+       SUBSCRIPTIONS
+      */
+
+      if (
+        payment.paymentType ===
+        "subscription"
+      ) {
+        const plan =
+          await SubscriptionPlan.findById(
+            payment.subscriptionId
+          );
+
+        if (plan) {
+          // Create UserSubscription record
+          await UserSubscription.create(
+            {
+              userId:
+                payment.userId,
+
+              planId:
+                payment.subscriptionId,
+
+              startDate:
+                new Date(),
+
+              endDate:
+                new Date(
+                  Date.now() +
+                    plan.durationDays *
+                      86400000
+                ),
+
+              status: "active",
+            }
+          );
+
+          // Update user's subscription state to premium
+          await User.findByIdAndUpdate(
+            payment.userId,
+            {
+              subscription:
+                "premium",
+            }
+          );
+        }
+      }
+
+      /*
+       COINS
+      */
+
+      if (
+        payment.paymentType ===
+        "coins"
+      ) {
+        await UserCoinWallet.findOneAndUpdate(
+          {
+            userId:
+              payment.userId,
+          },
+          {
+            $inc: {
+              coins:
+                payment.coinsPurchased,
+
+              totalPurchased:
+                payment.coinsPurchased,
+            },
+          },
+          {
+            new: true,
+
+            upsert: true,
+          }
+        );
+      }
+
+      res
+        .status(200)
+        .json({
+          received: true,
+        });
+    } catch (err) {
+      console.log(
+        "Webhook error:",
+        err.message
+      );
+
+      res.status(200).json({
+        received: true,
+      });
+    }
+  };

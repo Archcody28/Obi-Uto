@@ -5,6 +5,7 @@ const {
   createCheckout,
   purchaseCoins,
   verifyCheckout,
+  handleWebhook,
 } = require(
   "../controllers/paymentController"
 );
@@ -32,6 +33,15 @@ router.post(
 router.get(
   "/verify/:reference",
   verifyCheckout
+);
+
+// Paystack webhook - no auth middleware (Paystack signs the request)
+router.post(
+  "/webhook",
+  express.raw({
+    type: "application/json",
+  }),
+  handleWebhook
 );
 
 module.exports =

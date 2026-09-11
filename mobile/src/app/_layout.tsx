@@ -103,7 +103,7 @@ if (!data?.type) {
 
           case "upload":
             router.push({
-              pathname: "/player",
+              pathname: "/details" as any,
               params: {
                 mediaId:
                   data.mediaId,
@@ -123,6 +123,18 @@ if (!data?.type) {
             );
             break;
 
+          case "payment":
+            router.push(
+              "/wallet" as any
+            );
+            break;
+
+          case "download":
+            router.push(
+              "/downloads" as any
+            );
+            break;
+
           case "follow":
             router.push({
               pathname:
@@ -134,6 +146,17 @@ if (!data?.type) {
             });
             break;
 
+          case "comment":
+            router.push({
+              pathname: "/details" as any,
+              params: {
+                mediaId:
+                  data.mediaId,
+              },
+            });
+            break;
+
+          case "system":
           default:
             break;
         }

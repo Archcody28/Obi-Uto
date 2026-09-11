@@ -59,7 +59,44 @@ seedGifts();
 connectDB();
 mediaServer.run();
 
-app.use(cors());
+// CORS configuration - environment driven allowlist
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : [];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+
+    // In development, allow localhost
+    if (process.env.NODE_ENV !== "production") {
+      if (
+        origin.startsWith("http://localhost") ||
+        origin.startsWith("http://127.0.0.1") ||
+        origin.startsWith("http://192.168.")
+      ) {
+        return callback(null, true);
+      }
+    }
+
+    // Check allowlist
+    if (allowedOrigins.length > 0 && allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // In production with no allowlist configured, deny
+    if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+      return callback(new Error("CORS not allowed"));
+    }
+
+    // Development fallback
+    callback(null, true);
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Apply rate limiting to sensitive routes
