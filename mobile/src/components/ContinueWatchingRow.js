@@ -16,7 +16,7 @@ import {
 } from "../store/watchStore";
 
 import {
-  getContinueWatching,
+  continueWatching,
 } from "../api/watchApi";
 
 export default function ContinueWatchingRow() {
@@ -36,7 +36,7 @@ export default function ContinueWatchingRow() {
   const load = async () => {
     try {
       const data =
-        await getContinueWatching();
+        await continueWatching();
 
       setItems(data);
     } catch (err) {

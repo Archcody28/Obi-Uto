@@ -501,11 +501,8 @@ export default function PlayerScreen() {
             id:
              Date.now()
              .toString(),
-             execute:
-             () =>
-              saveProgressApi(
-                payload
-              ),
+             type: "save-progress",
+             payload,
           });
         }
 
