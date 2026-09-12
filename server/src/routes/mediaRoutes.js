@@ -16,9 +16,6 @@ const authMiddleware =
 const adminMiddleware =
   require("../middleware/adminMiddleware");
 
-const premiumMiddleware =
-  require("../middleware/premiumMiddleware");
-
 const router =
   express.Router();
 
@@ -49,7 +46,6 @@ router.get(
 router.get(
   "/:id",
   authMiddleware,
-  premiumMiddleware,
   getMediaById
 );
 

@@ -105,8 +105,7 @@ if (!data?.type) {
             router.push({
               pathname: "/details" as any,
               params: {
-                mediaId:
-                  data.mediaId,
+                id: data.mediaId,
               },
             });
             break;
@@ -150,8 +149,7 @@ if (!data?.type) {
             router.push({
               pathname: "/details" as any,
               params: {
-                mediaId:
-                  data.mediaId,
+                id: data.mediaId,
               },
             });
             break;

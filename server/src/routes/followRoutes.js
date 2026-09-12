@@ -1,6 +1,11 @@
 const express =
   require("express");
 
+const authMiddleware =
+  require(
+    "../middleware/authMiddleware"
+  );
+
 const {
   followCreator,
   unfollowCreator,
@@ -14,11 +19,13 @@ const router =
 
 router.post(
   "/follow",
+  authMiddleware,
   followCreator
 );
 
 router.post(
   "/unfollow",
+  authMiddleware,
   unfollowCreator
 );
 

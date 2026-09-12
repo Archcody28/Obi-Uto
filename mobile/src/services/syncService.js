@@ -20,11 +20,7 @@ const taskExecutors = {
   },
   // Follow user
   "follow-user": async (payload) => {
-    return api.post("/follow", payload);
-  },
-  // Update profile
-  "update-profile": async (payload) => {
-    return api.put("/users/profile", payload);
+    return api.post("/follows/follow", payload);
   },
 };
 

@@ -50,14 +50,22 @@ const {
 // SEARCH MEDIA
  const searchMedia = async (req, res) => {
   try {
-    const q = req.query.q || "";
+    let q = req.query.q || "";
+
+    // Enforce string type and length (prevents operator injection / regex DoS)
+    if (typeof q !== "string") {
+      q = "";
+    }
+    q = q.trim().slice(0, 100);
+    // Escape regex special characters
+    q = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     const results = await Media.find({
       title: {
         $regex: q,
         $options: "i",
       },
-    });
+    }).limit(50);
 
     res.json(results);
   } catch (error) {
@@ -203,8 +211,7 @@ if (media.creator) {
   );
 
   res.status(500).json({
-    message: err.message,
-    stack: err.stack,
+    message: "Failed to fetch media",
   });
 }
 };

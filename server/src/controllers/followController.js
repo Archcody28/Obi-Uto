@@ -10,9 +10,19 @@ const followCreator =
   async (req, res) => {
     try {
       const {
-        userId,
         creatorId,
       } = req.body;
+
+      // Server-derived identity — never trust client userId
+      const userId =
+        req.user.id;
+
+      if (!creatorId) {
+        return res.status(400).json({
+          message:
+            "creatorId is required",
+        });
+      }
 
       const existing =
         await Follow.findOne({
@@ -59,9 +69,19 @@ const unfollowCreator =
   async (req, res) => {
     try {
       const {
-        userId,
         creatorId,
       } = req.body;
+
+      // Server-derived identity — never trust client userId
+      const userId =
+        req.user.id;
+
+      if (!creatorId) {
+        return res.status(400).json({
+          message:
+            "creatorId is required",
+        });
+      }
 
       await Follow.findOneAndDelete(
         {
