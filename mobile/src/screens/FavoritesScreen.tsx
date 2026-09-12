@@ -189,6 +189,26 @@ export default function FavoritesScreen() {
                       await removeFavoriteApi(
                         item.mediaId
                       );
+                      setApiFavorites(
+                        (prev) =>
+                          prev.filter(
+                            (fav) => {
+                              const favMediaId =
+                                String(
+                                  fav.media?._id ??
+                                    fav.media ??
+                                    fav._id ??
+                                    ""
+                                );
+                              return (
+                                favMediaId !==
+                                String(
+                                  item.mediaId
+                                )
+                              );
+                            }
+                          )
+                      );
                     }
                     removeFavorite(
                       item.mediaId
