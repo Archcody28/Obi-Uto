@@ -1,18 +1,18 @@
-import React,
-{
+import React, {
   useEffect,
 } from "react";
 
 import {
-  View,
-  Text,
   FlatList,
   StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 import {
   useCoinWalletStore,
 } from "../store/coinWalletStore";
+import { AppTheme } from "../constants/theme";
 
 export default function CoinWalletScreen() {
   const {
@@ -29,83 +29,61 @@ export default function CoinWalletScreen() {
   }, []);
 
   return (
-    <View
-      style={
-        styles.container
-      }
-    >
-      <Text
-        style={
-          styles.balance
-        }
-      >
-        🪙 {wallet.coins}
+    <View style={styles.container}>
+      <Text style={styles.kicker}>
+        Wallet
+      </Text>
+      <Text style={styles.title}>
+        Coin Wallet
       </Text>
 
-      <Text
-        style={
-          styles.stats
-        }
-      >
-        Purchased:
-        {" "}
-        {
-          wallet.totalPurchased
-        }
-      </Text>
+      <View style={styles.balanceCard}>
+        <Text style={styles.label}>
+          Available coins
+        </Text>
+        <Text style={styles.balance}>
+          {wallet.coins}
+        </Text>
+      </View>
 
-      <Text
-        style={
-          styles.stats
-        }
-      >
-        Spent:
-        {" "}
-        {
-          wallet.totalSpent
-        }
-      </Text>
+      <View style={styles.summaryRow}>
+        <Summary
+          label="Purchased"
+          value={wallet.totalPurchased}
+        />
+        <Summary
+          label="Spent"
+          value={wallet.totalSpent}
+        />
+      </View>
 
-      <Text
-        style={
-          styles.section
-        }
-      >
+      <Text style={styles.section}>
         Purchase History
       </Text>
 
       <FlatList
         data={history}
-        keyExtractor={
-          (item) =>
-            item._id
+        keyExtractor={(item) =>
+          item._id
         }
-        renderItem={({
-          item,
-        }) => (
-          <View
-            style={
-              styles.card
-            }
-          >
-            <Text
-              style={
-                styles.text
-              }
-            >
-              +{
-                item.coinsPurchased
-              } Coins
-            </Text>
+        ListEmptyComponent={
+          <Text style={styles.empty}>
+            No coin purchases yet.
+          </Text>
+        }
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <View>
+              <Text style={styles.text}>
+                {item.coinsPurchased} Coins
+              </Text>
+              <Text style={styles.meta}>
+                Wallet top-up
+              </Text>
+            </View>
 
-            <Text
-              style={
-                styles.text
-              }
-            >
-              ₦{
-                item.amount
-              }
+            <Text style={styles.amount}>
+              NGN {item.amount}
             </Text>
           </View>
         )}
@@ -114,44 +92,133 @@ export default function CoinWalletScreen() {
   );
 }
 
-const styles =
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor:
-        "#0D0D0D",
-      padding: 20,
-    },
+function Summary({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  return (
+    <View style={styles.summaryCard}>
+      <Text style={styles.summaryValue}>
+        {value}
+      </Text>
+      <Text style={styles.summaryLabel}>
+        {label}
+      </Text>
+    </View>
+  );
+}
 
-    balance: {
-      color: "#FFF",
-      fontSize: 36,
-      fontWeight: "700",
-    },
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: AppTheme.colors.background,
+    padding: 20,
+  },
 
-    stats: {
-      color: "#AAA",
-      marginTop: 10,
-      fontSize: 16,
-    },
+  kicker: {
+    color: AppTheme.colors.accent,
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    marginTop: 10,
+  },
 
-    section: {
-      color: "#FFF",
-      fontSize: 22,
-      marginTop: 30,
-      marginBottom: 20,
-      fontWeight: "700",
-    },
+  title: {
+    color: AppTheme.colors.text,
+    fontSize: 30,
+    fontWeight: "900",
+    marginTop: 4,
+    marginBottom: 18,
+  },
 
-    card: {
-      backgroundColor:
-        "#1A1A1A",
-      padding: 15,
-      borderRadius: 10,
-      marginBottom: 10,
-    },
+  balanceCard: {
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: AppTheme.radius.lg,
+    padding: 20,
+    marginBottom: 12,
+  },
 
-    text: {
-      color: "#FFF",
-    },
-  });
+  label: {
+    color: AppTheme.colors.textMuted,
+    fontWeight: "800",
+  },
+
+  balance: {
+    color: AppTheme.colors.text,
+    fontSize: 42,
+    fontWeight: "900",
+    marginTop: 8,
+  },
+
+  summaryRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  summaryCard: {
+    flex: 1,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.border,
+    borderWidth: 1,
+    borderRadius: AppTheme.radius.md,
+    padding: 14,
+  },
+
+  summaryValue: {
+    color: AppTheme.colors.text,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+
+  summaryLabel: {
+    color: AppTheme.colors.textSubtle,
+    marginTop: 4,
+    fontWeight: "700",
+  },
+
+  section: {
+    color: AppTheme.colors.text,
+    fontSize: 20,
+    marginTop: 28,
+    marginBottom: 12,
+    fontWeight: "900",
+  },
+
+  card: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.border,
+    borderWidth: 1,
+    padding: 16,
+    borderRadius: AppTheme.radius.md,
+    marginBottom: 10,
+  },
+
+  text: {
+    color: AppTheme.colors.text,
+    fontWeight: "900",
+  },
+
+  meta: {
+    color: AppTheme.colors.textSubtle,
+    marginTop: 4,
+  },
+
+  amount: {
+    color: AppTheme.colors.accent,
+    fontWeight: "900",
+  },
+
+  empty: {
+    color: AppTheme.colors.textMuted,
+    textAlign: "center",
+    marginTop: 34,
+  },
+});

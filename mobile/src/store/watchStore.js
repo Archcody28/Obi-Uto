@@ -21,4 +21,9 @@ export const useWatchStore =
           ],
         };
       }),
+
+    clearWatching: () =>
+      set({
+        watching: [],
+      }),
   }));

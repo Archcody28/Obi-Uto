@@ -12,6 +12,7 @@ const authMiddleware =
 const {
   createContent,
   myUploads,
+  deleteMyContent,
 } = require(
   "../controllers/creatorUploadController"
 );
@@ -26,6 +27,12 @@ router.get(
   "/content",
   authMiddleware,
   myUploads
+);
+
+router.delete(
+  "/content/:id",
+  authMiddleware,
+  deleteMyContent
 );
 
 module.exports =

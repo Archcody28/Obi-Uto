@@ -87,4 +87,12 @@ export const usePlayerStore =
           queue: [],
           currentIndex: 0,
         }),
+
+    resetPlayer:
+      () =>
+        set({
+          currentMedia: null,
+          queue: [],
+          currentIndex: 0,
+        }),
   }));

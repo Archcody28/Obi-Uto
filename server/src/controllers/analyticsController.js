@@ -91,7 +91,7 @@ const getCreatorAnalytics =
 
       const media =
         await Media.find({
-          creator: creatorId,
+          creatorId,
         });
 
       const totalViews =

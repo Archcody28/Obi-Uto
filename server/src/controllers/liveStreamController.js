@@ -1,6 +1,9 @@
 const LiveStream =
   require("../models/LiveStream");
 
+const Creator =
+  require("../models/Creator");
+
 const generateStreamKey =
   require(
     "../utils/generateStreamKey"
@@ -9,11 +12,26 @@ const generateStreamKey =
 exports.createStream =
   async (req, res) => {
     try {
+      const creator =
+        await Creator.findOne({
+          userId:
+            req.user.id,
+        });
+
+      if (!creator) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Creator account required",
+          });
+      }
+
       const stream =
         await LiveStream.create(
           {
             creatorId:
-              req.body.creatorId,
+              creator._id,
 
             title:
               req.body.title,
@@ -54,52 +72,136 @@ exports.getLiveStreams =
     res.json(streams);
   };
 
-  exports.startStream =
+exports.startStream =
   async (req, res) => {
-    const stream =
-      await LiveStream.findByIdAndUpdate(
-        req.params.id,
-        {
-          isLive: true,
+    try {
+      const creator =
+        await Creator.findOne({
+          userId:
+            req.user.id,
+        });
 
-          startedAt:
-            new Date(),
-        },
-        {
-          new: true,
-        }
-      );
+      if (!creator) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Creator account required",
+          });
+      }
 
-    res.json(stream);
+      const stream =
+        await LiveStream.findOneAndUpdate(
+          {
+            _id: req.params.id,
+            creatorId:
+              creator._id,
+          },
+          {
+            isLive: true,
+
+            startedAt:
+              new Date(),
+          },
+          {
+            new: true,
+          }
+        );
+
+      if (!stream) {
+        return res
+          .status(404)
+          .json({
+            message:
+              "Stream not found",
+          });
+      }
+
+      res.json(stream);
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err.message,
+      });
+    }
   };
 
-  exports.endStream =
+exports.endStream =
   async (req, res) => {
-    const stream =
-      await LiveStream.findByIdAndUpdate(
-        req.params.id,
-        {
-          isLive: false,
+    try {
+      const creator =
+        await Creator.findOne({
+          userId:
+            req.user.id,
+        });
 
-          endedAt:
-            new Date(),
-        },
-        {
-          new: true,
-        }
-      );
+      if (!creator) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Creator account required",
+          });
+      }
 
-    res.json(stream);
+      const stream =
+        await LiveStream.findOneAndUpdate(
+          {
+            _id: req.params.id,
+            creatorId:
+              creator._id,
+          },
+          {
+            isLive: false,
+
+            endedAt:
+              new Date(),
+          },
+          {
+            new: true,
+          }
+        );
+
+      if (!stream) {
+        return res
+          .status(404)
+          .json({
+            message:
+              "Stream not found",
+          });
+      }
+
+      res.json(stream);
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err.message,
+      });
+    }
   };
   exports.scheduleStream =
   async (req, res) => {
     try {
+      const creator =
+        await Creator.findOne({
+          userId:
+            req.user.id,
+        });
+
+      if (!creator) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Creator account required",
+          });
+      }
 
       const stream =
         await LiveStream.create({
 
           creatorId:
-            req.body.creatorId,
+            creator._id,
 
           title:
             req.body.title,

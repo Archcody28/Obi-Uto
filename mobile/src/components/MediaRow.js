@@ -7,6 +7,7 @@ import {
 } from "react-native";
 
 import MediaCard from "./MediaCard";
+import { AppTheme } from "../constants/theme";
 
 export default function MediaRow({
   title,
@@ -18,10 +19,14 @@ export default function MediaRow({
         {title}
       </Text>
 
-      <FlatList
+      {data?.length ? (
+        <FlatList
         horizontal
         data={data}
         showsHorizontalScrollIndicator={false}
+        contentContainerStyle={
+          styles.listContent
+        }
         keyExtractor={(item) =>
   item._id?.toString()
 }
@@ -29,21 +34,37 @@ export default function MediaRow({
           <MediaCard item={item} />
         )}
       />
+      ) : (
+        <Text style={styles.empty}>
+          No titles available yet.
+        </Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginTop: 20,
-    marginBottom: 10,
+    marginBottom: 24,
   },
 
   title: {
-    color: "#fff",
+    color: AppTheme.colors.text,
     fontSize: 20,
-    fontWeight: "700",
+    fontWeight: "800",
     marginBottom: 12,
-    marginLeft: 10,
+    marginLeft: 16,
+  },
+
+  listContent: {
+    paddingLeft: 16,
+    paddingRight: 2,
+  },
+
+  empty: {
+    color:
+      AppTheme.colors.textSubtle,
+    marginLeft: 16,
+    marginBottom: 6,
   },
 });

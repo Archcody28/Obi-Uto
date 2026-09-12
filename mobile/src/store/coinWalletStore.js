@@ -37,5 +37,16 @@ export const
               history,
             });
           },
+
+        clearWallet:
+          () =>
+            set({
+              wallet: {
+                coins: 0,
+                totalPurchased: 0,
+                totalSpent: 0,
+              },
+              history: [],
+            }),
       })
     );

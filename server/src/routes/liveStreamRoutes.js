@@ -14,12 +14,13 @@ const {
 
 const router =
   express.Router();
+const authMiddleware = require("../middleware/authMiddleware");
 
 router.post(
   "/",
+  authMiddleware,
   createStream
 );
-const authMiddleware = require("../middleware/authMiddleware");
 
 router.get(
   "/live",
@@ -28,11 +29,13 @@ router.get(
 
 router.put(
   "/start/:id",
+  authMiddleware,
   startStream
 );
 
 router.put(
   "/end/:id",
+  authMiddleware,
   endStream
 );
 

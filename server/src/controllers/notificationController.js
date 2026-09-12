@@ -15,7 +15,6 @@ exports.registerPushToken =
   async (req, res) => {
     try {
       const {
-        userId,
         token,
         platform,
       } = req.body;
@@ -23,7 +22,8 @@ exports.registerPushToken =
       const pushToken =
         await PushToken.findOneAndUpdate(
           {
-            userId,
+            userId:
+              req.user.id,
           },
           {
             token,
@@ -53,7 +53,7 @@ exports.getNotifications =
       const notifications =
         await Notification.find({
           userId:
-            req.params.userId,
+            req.user.id,
         })
           .sort({
             createdAt: -1,
@@ -77,8 +77,11 @@ exports.markRead =
   async (req, res) => {
     try {
       const notification =
-        await Notification.findByIdAndUpdate(
-          req.params.id,
+        await Notification.findOneAndUpdate(
+          {
+            _id: req.params.id,
+            userId: req.user.id,
+          },
           {
             read: true,
           },
@@ -107,7 +110,7 @@ exports.markAllRead =
       await Notification.updateMany(
         {
           userId:
-            req.params.userId,
+            req.user.id,
         },
         {
           read: true,
@@ -132,9 +135,10 @@ exports.markAllRead =
 exports.deleteNotification =
   async (req, res) => {
     try {
-      await Notification.findByIdAndDelete(
-        req.params.id
-      );
+      await Notification.findOneAndDelete({
+        _id: req.params.id,
+        userId: req.user.id,
+      });
 
       res.json({
         message:
@@ -152,13 +156,12 @@ exports.notifyMe =
     try {
       const {
         streamId,
-        userId,
       } = req.body;
 
-      if (!streamId || !userId) {
+      if (!streamId) {
         return res.status(400).json({
           error:
-            "streamId and userId are required",
+            "streamId is required",
         });
       }
 
@@ -167,7 +170,8 @@ exports.notifyMe =
           streamId,
           {
             $addToSet: {
-              notifyUsers: userId,
+              notifyUsers:
+                req.user.id,
             },
           },
           {

@@ -77,6 +77,15 @@ exports.createContent =
             req.user.id,
         });
 
+      if (!creator) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Creator account required",
+          });
+      }
+
       const uploads =
         await Media.find({
           creatorId:
@@ -88,6 +97,54 @@ exports.createContent =
       res.json(
         uploads
       );
+    } catch (err) {
+      res.status(500).json({
+        message:
+          err.message,
+      });
+    }
+  };
+
+exports.deleteMyContent =
+  async (req, res) => {
+    try {
+      const creator =
+        await Creator.findOne({
+          userId:
+            req.user.id,
+        });
+
+      if (!creator) {
+        return res
+          .status(403)
+          .json({
+            message:
+              "Creator account required",
+          });
+      }
+
+      const media =
+        await Media.findOne({
+          _id: req.params.id,
+          creatorId:
+            creator._id,
+        });
+
+      if (!media) {
+        return res
+          .status(404)
+          .json({
+            message:
+              "Content not found",
+          });
+      }
+
+      await media.deleteOne();
+
+      res.json({
+        message:
+          "Content deleted successfully",
+      });
     } catch (err) {
       res.status(500).json({
         message:

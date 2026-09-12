@@ -75,7 +75,7 @@ await setActiveProfile(
 );
 
 router.replace(
-  "/home"
+  "/(tabs)/home" as any
 );
             }}
           >

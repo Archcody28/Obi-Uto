@@ -42,6 +42,16 @@ export const getMyUploads =
     return response.data;
   };
 
+export const getMyCreatorProfile =
+  async () => {
+    const response =
+      await api.get(
+        "/creators/me"
+      );
+
+    return response.data;
+  };
+
 export const getCreatorContent =
   async (creatorId) => {
     const response =
@@ -56,7 +66,7 @@ export const deleteContent =
   async (id) => {
     const response =
       await api.delete(
-        `/media/${id}`
+        `/creator/content/${id}`
       );
 
     return response.data;

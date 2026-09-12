@@ -26,6 +26,7 @@ function sanitizeUser(user) {
     subscription: user.subscription,
     role: user.role,
     referralCode: user.referralCode,
+    profiles: user.profiles || [],
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -128,6 +129,27 @@ exports.login = async (req, res) => {
     return res.json({
       message: "Login successful",
       token,
+      user: sanitizeUser(user),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+// CURRENT USER
+exports.me = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    return res.json({
       user: sanitizeUser(user),
     });
   } catch (err) {

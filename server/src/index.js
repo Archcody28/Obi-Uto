@@ -35,6 +35,7 @@ const mediaServer =
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const mongoose = require("mongoose");
 
 const connectDB = require("./config/db");
 
@@ -187,10 +188,25 @@ app.use("/api/business", businessRoutes);
 app.use("/api/kpi", kpiRoutes);
 app.use("/api/recommendations-v2", recommendationV2Routes);
 app.get("/health", (req, res) => {
+  const databaseStates = {
+    0: "disconnected",
+    1: "connected",
+    2: "connecting",
+    3: "disconnecting",
+  };
+  const readyState =
+    mongoose.connection.readyState;
+
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    database: {
+      readyState,
+      state:
+        databaseStates[readyState] ||
+        "unknown",
+    },
   });
 });
 
@@ -250,9 +266,6 @@ function shutdown(signal) {
 
   server.close(() => {
     console.log("HTTP server closed");
-
-    const mongoose =
-      require("mongoose");
 
     mongoose.connection.close(
       false,

@@ -22,6 +22,7 @@ import {
 import {
   useAuthStore,
 } from "../store/authStore";
+import { AppTheme } from "../constants/theme";
 
 export default function LoginScreen() {
   const setToken =
@@ -91,16 +92,25 @@ export default function LoginScreen() {
         styles.container
       }
     >
+      <Text style={styles.kicker}>
+        Obi-Uto
+      </Text>
       <Text
         style={
           styles.title
         }
       >
-        Media App
+        Sign in to your cinematic library.
+      </Text>
+      <Text style={styles.subtitle}>
+        Continue watching, manage your wallet, and stream live experiences from one account.
       </Text>
 
       <TextInput
         placeholder="Email"
+        placeholderTextColor={
+          AppTheme.colors.textSubtle
+        }
         style={
           styles.input
         }
@@ -113,6 +123,9 @@ export default function LoginScreen() {
 
       <TextInput
         placeholder="Password"
+        placeholderTextColor={
+          AppTheme.colors.textSubtle
+        }
         secureTextEntry
         style={
           styles.input
@@ -124,9 +137,11 @@ export default function LoginScreen() {
       />
 
       <TouchableOpacity
-        style={
-          styles.button
-        }
+        style={[
+          styles.button,
+          loading &&
+            styles.buttonDisabled,
+        ]}
         onPress={
           handleLogin
         }
@@ -150,36 +165,61 @@ const styles =
   StyleSheet.create({
     container: {
       flex: 1,
-      justifyContent:
-        "center",
-      padding: 20,
+      justifyContent: "center",
+      backgroundColor: AppTheme.colors.background,
+      padding: AppTheme.spacing.xl,
+    },
+
+    kicker: {
+      color: AppTheme.colors.accent,
+      fontSize: AppTheme.typography.kicker.fontSize,
+      fontWeight: AppTheme.typography.kicker.fontWeight,
+      letterSpacing: AppTheme.typography.kicker.letterSpacing,
+      textTransform: "uppercase",
+      marginBottom: AppTheme.spacing.md,
     },
 
     title: {
-      fontSize: 28,
-      fontWeight: "700",
-      marginBottom: 30,
+      color: AppTheme.colors.text,
+      fontSize: AppTheme.typography.display.fontSize,
+      fontWeight: AppTheme.typography.display.fontWeight,
+      lineHeight: AppTheme.typography.display.lineHeight,
+      marginBottom: AppTheme.spacing.md,
+    },
+
+    subtitle: {
+      color: AppTheme.colors.textMuted,
+      fontSize: AppTheme.typography.body.fontSize,
+      lineHeight: AppTheme.typography.body.lineHeight,
+      marginBottom: AppTheme.spacing.xxl,
     },
 
     input: {
+      minHeight: 54,
+      backgroundColor: AppTheme.colors.input,
+      color: AppTheme.colors.text,
       borderWidth: 1,
-      borderColor: "#444",
-      marginBottom: 15,
-      padding: 12,
-      borderRadius: 10,
+      borderColor: AppTheme.colors.border,
+      marginBottom: AppTheme.spacing.lg,
+      paddingHorizontal: AppTheme.spacing.lg,
+      borderRadius: AppTheme.radius.md,
     },
 
     button: {
-      backgroundColor:
-        "#6C5CE7",
-      padding: 15,
-      borderRadius: 10,
+      backgroundColor: AppTheme.colors.accent,
+      minHeight: 54,
+      justifyContent: "center",
+      borderRadius: AppTheme.radius.md,
+    },
+
+    buttonDisabled: {
+      opacity: 0.65,
     },
 
     text: {
-      color: "#fff",
+      color: AppTheme.colors.background,
       textAlign:
         "center",
-      fontWeight: "700",
+      fontWeight: "900",
     },
   });

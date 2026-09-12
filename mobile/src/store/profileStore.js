@@ -58,5 +58,17 @@ export const useProfileStore = create((set) => ({
       set({
         activeProfile: profile,
       });
-    }
+    },
+
+  clearProfiles: async () => {
+    await AsyncStorage.multiRemove([
+      "profiles",
+      "activeProfile",
+    ]);
+
+    set({
+      profiles: [],
+      activeProfile: null,
+    });
+  },
 }));

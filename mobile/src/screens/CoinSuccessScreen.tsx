@@ -1,32 +1,38 @@
 import React from "react";
 
 import {
-  View,
+  StyleSheet,
   Text,
   TouchableOpacity,
-  StyleSheet,
+  View,
 } from "react-native";
 
 import {
   router,
 } from "expo-router";
 
+import { AppTheme } from "../constants/theme";
+
 export default function CoinSuccessScreen() {
   return (
     <View style={styles.container}>
-      <Text style={styles.icon}>
-        🎉
+      <Text style={styles.kicker}>
+        Payment complete
       </Text>
 
       <Text style={styles.title}>
-        Coins Added Successfully
+        Coins added successfully.
+      </Text>
+
+      <Text style={styles.copy}>
+        Your wallet balance will refresh the next time the wallet opens.
       </Text>
 
       <TouchableOpacity
         style={styles.button}
         onPress={() =>
           router.replace(
-            "/home"
+            "/(tabs)/home" as any
           )
         }
       >
@@ -41,34 +47,44 @@ export default function CoinSuccessScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0D0D0D",
+    backgroundColor: AppTheme.colors.background,
     justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
+    padding: 24,
   },
 
-  icon: {
-    fontSize: 60,
-    marginBottom: 20,
+  kicker: {
+    color: AppTheme.colors.accent,
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    marginBottom: 8,
   },
 
   title: {
-    color: "#FFF",
-    fontSize: 24,
-    fontWeight: "700",
-    marginBottom: 30,
-    textAlign: "center",
+    color: AppTheme.colors.text,
+    fontSize: 30,
+    fontWeight: "900",
+    lineHeight: 36,
+  },
+
+  copy: {
+    color: AppTheme.colors.textMuted,
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 12,
+    marginBottom: 24,
   },
 
   button: {
-    backgroundColor: "#6C5CE7",
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 10,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: AppTheme.colors.accent,
+    borderRadius: AppTheme.radius.md,
   },
 
   buttonText: {
-    color: "#FFF",
-    fontWeight: "700",
+    color: AppTheme.colors.background,
+    fontWeight: "900",
   },
 });

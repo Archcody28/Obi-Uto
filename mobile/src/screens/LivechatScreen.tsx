@@ -25,11 +25,12 @@ import {
 
 import GiftModal
   from "../components/GiftModal";
+import { AppTheme } from "../constants/theme";
 
 export default function LiveChatScreen({
   streamId,
   isModerator = false,
-  moderatorId,
+  moderatorId = null,
   stream,
 }) {
   const [
@@ -203,12 +204,11 @@ export default function LiveChatScreen({
       }
 
       socket.emit(
-        "send-message",
-        {
-          streamId,
-          user: "User",
-          message,
-        }
+      "send-message",
+      {
+        streamId,
+        message,
+      }
       );
 
       setMessage("");
@@ -237,6 +237,7 @@ export default function LiveChatScreen({
               socket.emit(
                 "pin-message",
                 {
+                  streamId,
                   messageId:
                     item._id,
                 }
@@ -255,6 +256,7 @@ export default function LiveChatScreen({
               socket.emit(
                 "delete-message",
                 {
+                  streamId,
                   messageId:
                     item._id,
                 }
@@ -542,24 +544,25 @@ const styles =
     container: {
       flex: 1,
       backgroundColor:
-        "#000",
-      padding: 10,
+        AppTheme.colors.background,
+      padding: 12,
     },
 
     viewer: {
-      color: "#FFF",
+      color: AppTheme.colors.textMuted,
       marginBottom: 10,
       fontWeight:
-        "600",
+        "800",
     },
 
     msg: {
-      color: "#FFF",
+      color: AppTheme.colors.text,
       marginBottom: 8,
+      lineHeight: 20,
     },
 
     pinned: {
-      color: "#FFD700",
+      color: AppTheme.colors.accent,
     },
 
     username: {
@@ -569,19 +572,21 @@ const styles =
 
     tipBtn: {
       backgroundColor:
-        "#2D3436",
+        AppTheme.colors.surface,
       padding: 12,
-      borderRadius: 8,
+      borderRadius: AppTheme.radius.sm,
       alignItems:
         "center",
       marginVertical: 10,
+      borderColor: AppTheme.colors.border,
+      borderWidth: 1,
     },
 
     giftBtn: {
       backgroundColor:
-        "#E67E22",
+        AppTheme.colors.accentSoft,
       padding: 12,
-      borderRadius: 8,
+      borderRadius: AppTheme.radius.sm,
       alignItems:
         "center",
       marginBottom: 10,
@@ -604,17 +609,20 @@ const styles =
     input: {
       flex: 1,
       backgroundColor:
-        "#FFF",
-      borderRadius: 8,
+        AppTheme.colors.input,
+      color: AppTheme.colors.text,
+      borderRadius: AppTheme.radius.sm,
+      borderColor: AppTheme.colors.border,
+      borderWidth: 1,
       padding: 10,
       marginRight: 10,
     },
 
     send: {
       color:
-        "#6C5CE7",
+        AppTheme.colors.accent,
       fontWeight:
-        "700",
+        "900",
     },
 
     giftOverlay: {

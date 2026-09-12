@@ -59,6 +59,10 @@ exports.getMyContent =
             req.user.id,
         });
 
+      if (!creator) {
+        return res.json(null);
+      }
+
       const content =
         await Media.find({
           creatorId:

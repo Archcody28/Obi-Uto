@@ -4,28 +4,54 @@ import {
 import { useAuthStore } from "../store/authStore";
 import { SOCKET_URL } from "../config";
 
-// Create socket instance with auth token
-const createSocket = () => {
-  const token = useAuthStore.getState().token;
+let socket = null;
+let socketToken = null;
 
-  const socket = io(SOCKET_URL, {
+export const getSocket = () => {
+  const token =
+    useAuthStore.getState().token;
+
+  if (
+    socket &&
+    socketToken === token
+  ) {
+    if (
+      token &&
+      !socket.connected
+    ) {
+      socket.connect();
+    }
+
+    return socket;
+  }
+
+  if (socket) {
+    socket.disconnect();
+  }
+
+  socketToken = token;
+  socket = io(SOCKET_URL, {
     transports: ["websocket"],
+    autoConnect: !!token,
     auth: {
-      token: token,
+      token,
     },
   });
 
   return socket;
 };
 
-// Lazy-initialize socket
-let socket = null;
-
-const getSocket = () => {
-  if (!socket) {
-    socket = createSocket();
-  }
-  return socket;
+const socketProxy = {
+  emit: (...args) =>
+    getSocket().emit(...args),
+  on: (...args) =>
+    getSocket().on(...args),
+  off: (...args) =>
+    getSocket().off(...args),
+  connect: () =>
+    getSocket().connect(),
+  disconnect: () =>
+    getSocket().disconnect(),
 };
 
-export default getSocket();
+export default socketProxy;

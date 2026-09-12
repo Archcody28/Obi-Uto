@@ -1,16 +1,20 @@
 import {
+  useCallback,
   useEffect,
+  useRef,
 } from "react";
 
 import {
   Stack,
   useRouter,
+  useSegments,
 } from "expo-router";
 
 import * as Notifications from "expo-notifications";
 
 import {
   Platform,
+  Alert,
 } from "react-native";
 
 import {
@@ -23,6 +27,27 @@ import {
 import {
   useAuthStore,
 } from "../store/authStore";
+import {
+  useCoinWalletStore,
+} from "../store/coinWalletStore";
+import {
+  useDownloadStore,
+} from "../store/downloadStore";
+import {
+  useFavoritesStore,
+} from "../store/favoritesStore";
+import {
+  usePlayerStore,
+} from "../store/playerStore";
+import {
+  useProfileStore,
+} from "../store/profileStore";
+import {
+  useSyncStore,
+} from "../store/syncStore";
+import {
+  useWatchStore,
+} from "../store/watchStore";
 
 import {
   startSyncEngine,
@@ -33,17 +58,93 @@ export default function RootLayout() {
   useAuthStore(
     (state) => state.user
   );
+  const token =
+  useAuthStore(
+    (state) => state.token
+  );
+  const isRestoring =
+  useAuthStore(
+    (state) => state.isRestoring
+  );
   const restoreAuth =
   useAuthStore(
     (state) => state.restoreAuth
   );
   const router =
   useRouter();
+  const segments =
+  useSegments();
+  const clearedUnauthedState =
+    useRef(false);
+
+  const clearAuthenticatedStores =
+    useCallback(() => {
+    useFavoritesStore
+      .getState()
+      .clearFavorites();
+    useWatchStore
+      .getState()
+      .clearWatching();
+    usePlayerStore
+      .getState()
+      .resetPlayer();
+    useCoinWalletStore
+      .getState()
+      .clearWallet();
+    useSyncStore
+      .getState()
+      .clearQueue();
+    useDownloadStore
+      .getState()
+      .clearDownloads()
+      .catch(console.error);
+    useProfileStore
+      .getState()
+      .clearProfiles()
+      .catch(console.error);
+  }, []);
 
   // Restore auth state on app startup
   useEffect(() => {
     restoreAuth();
-  }, []);
+  }, [restoreAuth]);
+
+  useEffect(() => {
+    if (isRestoring) {
+      return;
+    }
+
+    const firstSegment =
+      segments[0];
+    const isIndex =
+      !firstSegment;
+
+    if (!token) {
+      if (!clearedUnauthedState.current) {
+        clearAuthenticatedStores();
+        clearedUnauthedState.current =
+          true;
+      }
+
+      if (!isIndex) {
+      router.replace("/");
+      }
+      return;
+    }
+
+    clearedUnauthedState.current =
+      false;
+
+    if (token && isIndex) {
+      router.replace("/(tabs)/home" as any);
+    }
+  }, [
+    token,
+    isRestoring,
+    segments,
+    router,
+    clearAuthenticatedStores,
+  ]);
 
   useEffect(() => {
   async function init() {
@@ -60,7 +161,6 @@ export default function RootLayout() {
       }
 
       await registerPushToken(
-        user._id,
         token,
         Platform.OS
       );
@@ -84,7 +184,7 @@ const data =
     type?: string;
     streamId?: string;
     mediaId?: string;
-    userId?: string;
+    creatorId?: string;
   };
 
 if (!data?.type) {
@@ -92,16 +192,31 @@ if (!data?.type) {
 }
         switch (data.type) {
           case "live":
-            router.push({
-              pathname: "/live" as any,
-              params: {
-                streamId:
-                  data.streamId,
-              },
-            });
+            if (data.streamId) {
+              router.push({
+                pathname: "/player" as any,
+                params: {
+                  mediaId:
+                    data.streamId,
+                  streamId:
+                    data.streamId,
+                  isLive: "true",
+                },
+              });
+            } else {
+              router.push("/live" as any);
+            }
             break;
 
           case "upload":
+            if (!data.mediaId) {
+              Alert.alert(
+                "Upload",
+                "This notification is missing a title destination."
+              );
+              break;
+            }
+
             router.push({
               pathname: "/details" as any,
               params: {
@@ -117,8 +232,9 @@ if (!data?.type) {
             break;
 
           case "subscription":
-            router.push(
-              "/subscription" as any
+            Alert.alert(
+              "Subscription",
+              "Subscription management is not available in this app yet."
             );
             break;
 
@@ -130,22 +246,37 @@ if (!data?.type) {
 
           case "download":
             router.push(
-              "/downloads" as any
+              "/(tabs)/downloads" as any
             );
             break;
 
           case "follow":
-            router.push({
-              pathname:
-                "/profile" as any,
-              params: {
-                userId:
-                  data.userId,
-              },
-            });
+            if (data.creatorId) {
+              router.push({
+                pathname:
+                  "/creator-profile" as any,
+                params: {
+                  creatorId:
+                    data.creatorId,
+                },
+              });
+            } else {
+              Alert.alert(
+                "Follow",
+                "This notification is missing a creator destination."
+              );
+            }
             break;
 
           case "comment":
+            if (!data.mediaId) {
+              Alert.alert(
+                "Comment",
+                "This notification is missing a title destination."
+              );
+              break;
+            }
+
             router.push({
               pathname: "/details" as any,
               params: {
@@ -163,7 +294,7 @@ if (!data?.type) {
 
   return () =>
     subscription.remove();
-}, []);
+}, [router]);
 useEffect(() => {
   startSyncEngine();
 }, []);

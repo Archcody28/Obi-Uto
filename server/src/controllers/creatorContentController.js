@@ -6,7 +6,7 @@ const getCreatorContent =
     try {
       const media =
         await Media.find({
-          creator:
+          creatorId:
             req.params.creatorId,
         }).sort({
           createdAt: -1,

@@ -60,6 +60,8 @@ import {
   useProfileStore,
 } from "../store/profileStore";
 import { useSyncStore } from "@/store/syncStore";
+import LiveChatScreen from "./LivechatScreen";
+import { AppTheme } from "../constants/theme";
 
 export default function PlayerScreen() {
   const params =
@@ -96,6 +98,30 @@ export default function PlayerScreen() {
     )
       ? params.title[0]
       : params.title;
+
+  const isLive =
+    Array.isArray(
+      params.isLive
+    )
+      ? params.isLive[0] ===
+        "true"
+      : params.isLive ===
+        "true";
+
+  const streamId =
+    Array.isArray(
+      params.streamId
+    )
+      ? params.streamId[0]
+      : params.streamId ||
+        mediaId;
+
+  const creatorId =
+    Array.isArray(
+      params.creatorId
+    )
+      ? params.creatorId[0]
+      : params.creatorId;
 
   const setCurrentMedia =
     usePlayerStore(
@@ -573,12 +599,27 @@ addFavorite({
     >
       <VideoView
         style={
-          styles.video
+          isLive
+            ? styles.liveVideo
+            : styles.video
         }
         player={player}
       />
 
-      {nextEpisode &&
+      {isLive && streamId && (
+        <View style={styles.chatPanel}>
+          <LiveChatScreen
+            streamId={streamId}
+            stream={{
+              _id: streamId,
+              creatorId,
+            }}
+          />
+        </View>
+      )}
+
+      {!isLive &&
+        nextEpisode &&
         countdown <=
           5 &&
         countdown >
@@ -644,7 +685,7 @@ addFavorite({
           </View>
         )}
 
-      {!localUri && (
+      {!isLive && !localUri && (
         <TouchableOpacity
           style={
             styles.downloadBtn
@@ -680,6 +721,7 @@ addFavorite({
         </Text>
       </TouchableOpacity>
 
+      {!isLive && (
       <TouchableOpacity
         style={
           styles.favoriteBtn
@@ -696,82 +738,92 @@ addFavorite({
           ❤️ Favorite
         </Text>
       </TouchableOpacity>
+      )}
     </View>
   );
 }
-
 const styles =
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor:
-        "#000",
+      backgroundColor: AppTheme.colors.background,
     },
 
     video: {
       flex: 1,
     },
 
+    liveVideo: {
+      height: 280,
+      backgroundColor: "#000000",
+    },
+
+    chatPanel: {
+      flex: 1,
+      borderTopColor: AppTheme.colors.border,
+      borderTopWidth: 1,
+    },
+
     errorText: {
-      color: "#fff",
-      textAlign:
-        "center",
-      marginTop: 50,
-      fontSize: 18,
+      color: AppTheme.colors.textMuted,
+      textAlign: "center",
+      marginTop: 60,
+      fontSize: AppTheme.typography.heading.fontSize,
     },
 
     downloadBtn: {
-      backgroundColor:
-        "#6C5CE7",
-      padding: 15,
-      marginTop: 10,
-      marginHorizontal: 16,
-      borderRadius: 8,
+      backgroundColor: AppTheme.colors.accent,
+      padding: AppTheme.spacing.lg,
+      marginTop: AppTheme.spacing.md,
+      marginHorizontal: AppTheme.spacing.lg,
+      borderRadius: AppTheme.radius.md,
     },
 
     favoriteBtn: {
-      backgroundColor:
-        "#E84393",
-      padding: 15,
-      marginTop: 10,
-      marginHorizontal: 16,
-      borderRadius: 8,
+      backgroundColor: AppTheme.colors.surface,
+      borderWidth: 1,
+      borderColor: AppTheme.colors.borderSoft,
+      padding: AppTheme.spacing.lg,
+      marginTop: AppTheme.spacing.md,
+      marginHorizontal: AppTheme.spacing.lg,
+      borderRadius: AppTheme.radius.md,
     },
 
     downloadText: {
-      color: "#fff",
-      textAlign:
-        "center",
-      fontWeight: "700",
+      color: AppTheme.colors.text,
+      textAlign: "center",
+      fontWeight: "900",
     },
 
     nextContainer: {
-      backgroundColor:
-        "#1A1A1A",
-      margin: 16,
-      padding: 16,
-      borderRadius: 12,
+      backgroundColor: AppTheme.colors.surface,
+      margin: AppTheme.spacing.lg,
+      padding: AppTheme.spacing.lg,
+      borderRadius: AppTheme.radius.lg,
+      borderWidth: 1,
+      borderColor: AppTheme.colors.borderSoft,
     },
 
     nextText: {
-      color: "#AAA",
-      textAlign:
-        "center",
+      color: AppTheme.colors.textSubtle,
+      textAlign: "center",
+      fontSize: AppTheme.typography.caption.fontSize,
+      fontWeight: AppTheme.typography.caption.fontWeight,
     },
 
     nextTitle: {
-      color: "#FFF",
-      fontWeight: "700",
-      textAlign:
-        "center",
-      marginVertical: 8,
+      color: AppTheme.colors.text,
+      fontWeight: "900",
+      textAlign: "center",
+      marginVertical: AppTheme.spacing.md,
     },
 
     cancelBtn: {
-      backgroundColor:
-        "#E74C3C",
-      marginTop: 12,
-      padding: 12,
-      borderRadius: 8,
+      marginTop: AppTheme.spacing.md,
+      padding: AppTheme.spacing.md,
+      borderRadius: AppTheme.radius.md,
+      backgroundColor: "rgba(225,91,100,0.16)",
+      borderWidth: 1,
+      borderColor: AppTheme.colors.danger,
     },
   });

@@ -4,13 +4,15 @@ import React, {
 } from "react";
 
 import {
-  View,
-  Text,
-  Image,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
+  ActivityIndicator,
+  Alert,
   FlatList,
+  ImageBackground,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import {
@@ -22,499 +24,488 @@ import {
   getMediaDetails,
   getEpisodes,
 } from "../api/mediaApi";
-
 import {
   getSimilar,
 } from "../api/recommendationApi";
-
 import {
   toggleLike,
   getComments,
   addComment,
 } from "../api/engagementApi";
-
+import {
+  addFavorite as addFavoriteApi,
+} from "../api/favoriteApi";
+import MediaRow from "../components/MediaRow";
+import {
+  useFavoritesStore,
+} from "../store/favoritesStore";
 import {
   usePlayerStore,
 } from "../store/playerStore";
-import MediaRow from "../components/MediaRow";
+import {
+  useProfileStore,
+} from "../store/profileStore";
+import { AppTheme } from "../constants/theme";
+
 export default function DetailsScreen() {
   const params =
-  useLocalSearchParams();
+    useLocalSearchParams();
 
-const id =
-  Array.isArray(params.id)
-    ? params.id[0]
-    : params.id;
+  const id =
+    Array.isArray(params.id)
+      ? params.id[0]
+      : params.id;
 
-  const [media, setMedia] =
-    useState(null);
-
-  const [similar,
-    setSimilar] =
-    useState([]);
-
+  const [
+    media,
+    setMedia,
+  ] = useState<any>(null);
+  const [
+    similar,
+    setSimilar,
+  ] = useState<any[]>([]);
   const [
     episodes,
     setEpisodes,
-  ] = useState([]);
-
+  ] = useState<any[]>([]);
   const [
     comments,
     setComments,
-  ] = useState([]);
-
+  ] = useState<any[]>([]);
   const [
     commentText,
     setCommentText,
   ] = useState("");
-
   const [
     liked,
     setLiked,
   ] = useState(false);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+  const [
+    error,
+    setError,
+  ] = useState("");
 
   const setQueue =
     usePlayerStore(
       (state) =>
         state.setQueue
     );
-
-  useEffect(() => {
-    loadMedia();
-    loadSimilar();
-  }, [id]);
+  const addFavorite =
+    useFavoritesStore(
+      (state) =>
+        state.addFavorite
+    );
 
   const loadMedia =
     async () => {
+      if (!id) {
+        setError(
+          "This title could not be opened."
+        );
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
       try {
         const data =
-          await getMediaDetails(
-            id
-          );
+          await getMediaDetails(id);
 
         setMedia(data);
 
-        /*
-         Load episodes
-        */
         if (
-          data.type ===
-          "series"
+          data.type === "series"
         ) {
           const eps =
             await getEpisodes(
               data._id
             );
-
-          setEpisodes(
-            eps
-          );
+          setEpisodes(eps);
         } else {
           setEpisodes([]);
         }
 
-        /*
-         Load comments
-        */
-        const loadedComments =
-          await getComments(
-            data._id
-          );
+        const [
+          loadedComments,
+          similarData,
+        ] = await Promise.all([
+          getComments(data._id),
+          getSimilar(data._id),
+        ]);
 
         setComments(
-          loadedComments
+          loadedComments || []
+        );
+        setSimilar(
+          similarData || []
+        );
+      } catch (err: any) {
+        console.log(err);
+        setError(
+          err?.response?.data
+            ?.message ||
+            "We could not load this title."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+  useEffect(() => {
+    loadMedia();
+  }, [id]);
+
+  const playItem = (
+    item: any
+  ) => {
+    setQueue(
+      [
+        {
+          mediaId: item._id,
+          title:
+            item.seriesInfo
+              ?.episodeTitle ||
+            item.title,
+          videoUrl:
+            item.videoUrl,
+        },
+      ],
+      0
+    );
+
+    router.push({
+      pathname: "/player",
+      params: {
+        mediaId: item._id,
+        videoUrl:
+          item.videoUrl,
+        title:
+          item.seriesInfo
+            ?.episodeTitle ||
+          item.title,
+      },
+    });
+  };
+
+  const handleFavorite =
+    async () => {
+      try {
+        const profile =
+          useProfileStore
+            .getState()
+            .activeProfile;
+
+        addFavorite({
+          id: media._id,
+          title: media.title,
+          profileId:
+            profile?.id,
+        });
+
+        await addFavoriteApi(
+          media._id
+        );
+
+        Alert.alert(
+          "Saved",
+          "Added to Favorites"
+        );
+      } catch (err) {
+        console.log(err);
+        Alert.alert(
+          "Favorite failed",
+          "Please try again."
+        );
+      }
+    };
+
+  const handleLike =
+    async () => {
+      try {
+        const result =
+          await toggleLike(
+            media._id
+          );
+
+        setLiked(
+          result.liked
         );
       } catch (err) {
         console.log(err);
       }
     };
 
-  const loadSimilar =
+  const handleComment =
     async () => {
       try {
-        const data =
-          await getSimilar(id);
+        if (
+          !commentText.trim()
+        ) {
+          return;
+        }
 
-        setSimilar(data);
+        await addComment(
+          media._id,
+          commentText.trim()
+        );
+
+        setCommentText("");
+
+        const updated =
+          await getComments(
+            media._id
+          );
+
+        setComments(updated);
       } catch (err) {
         console.log(err);
+        Alert.alert(
+          "Comment failed",
+          "Please try again."
+        );
       }
     };
 
-  if (!media) {
+  if (loading) {
     return (
-      <View
-        style={
-          styles.loadingContainer
-        }
-      >
-        <Text
-          style={
-            styles.loadingText
+      <View style={styles.state}>
+        <ActivityIndicator
+          color={
+            AppTheme.colors.accent
           }
-        >
-          Loading...
+        />
+        <Text style={styles.stateText}>
+          Loading title...
         </Text>
       </View>
     );
   }
 
+  if (error || !media) {
+    return (
+      <View style={styles.state}>
+        <Text style={styles.stateTitle}>
+          Title unavailable
+        </Text>
+        <Text style={styles.stateText}>
+          {error}
+        </Text>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={loadMedia}
+        >
+          <Text
+            style={styles.primaryText}
+          >
+            Retry
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const imageUri =
+    media.banner ||
+    media.thumbnail;
+
   return (
     <FlatList
       style={styles.container}
+      contentContainerStyle={
+        styles.content
+      }
       data={comments}
-      keyExtractor={(
-        item
-      ) => item._id}
+      keyExtractor={(item, index) =>
+        item._id ||
+        index.toString()
+      }
       ListHeaderComponent={
         <>
-          <Image
-            source={{
-              uri:
-                media.thumbnail,
-            }}
-            style={
-              styles.poster
+          <ImageBackground
+            source={
+              imageUri
+                ? {
+                    uri: imageUri,
+                  }
+                : undefined
             }
-          />
-
-          <Text
-            style={
-              styles.title
-            }
+            style={styles.hero}
+            imageStyle={styles.heroImage}
           >
-            {media.title}
-          </Text>
-
-          <Text
-            style={
-              styles.meta
-            }
-          >
-            {Array.isArray(
-              media.genre
-            )
-              ? media.genre.join(
-                  ", "
-                )
-              : media.genre}
-          </Text>
-
-          <Text
-            style={
-              styles.description
-            }
-          >
-            {
-              media.description
-            }
-          </Text>
-
-          {/* Episodes */}
-          {episodes.length >
-            0 && (
-            <>
-              <Text
-                style={{
-                  color:
-                    "#FFF",
-                  fontSize: 20,
-                  marginTop: 20,
-                  marginBottom: 10,
-                }}
-              >
-                Episodes
+            <View style={styles.heroShade}>
+              <Text style={styles.kicker}>
+                {media.type || "Title"}
               </Text>
-
-              <FlatList
-                data={
-                  episodes
-                }
-                keyExtractor={(
-                  item
-                ) =>
-                  item._id?.toString()
-                }
-                scrollEnabled={
-                  false
-                }
-                renderItem={({
-                  item,
-                }) => (
-                  <TouchableOpacity
-                    style={
-                      styles.playButton
-                    }
-                    onPress={() =>
-                      router.push(
-                        {
-                          pathname:
-                            "/player",
-
-                          params:
-                            {
-                              mediaId:
-                                item._id,
-
-                              videoUrl:
-                                item.videoUrl,
-
-                              title:
-                                item
-                                  .seriesInfo
-                                  ?.episodeTitle ||
-                                item.title,
-                            },
-                        }
+              <Text style={styles.title}>
+                {media.title}
+              </Text>
+              <Text style={styles.meta}>
+                {[
+                  media.releaseYear,
+                  Array.isArray(
+                    media.genre
+                  )
+                    ? media.genre.join(
+                        ", "
                       )
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.playText
-                      }
-                    >
-                      S
-                      {
-                        item
-                          .seriesInfo
-                          ?.seasonNumber
-                      }
-                      E
-                      {
-                        item
-                          .seriesInfo
-                          ?.episodeNumber
-                      }{" "}
-                      —{" "}
-                      {
-                        item
-                          .seriesInfo
-                          ?.episodeTitle
-                      }
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              />
-            </>
-          )}
+                    : media.genre,
+                  media.maturityRating,
+                ]
+                  .filter(Boolean)
+                  .join(" • ")}
+              </Text>
+            </View>
+          </ImageBackground>
 
-          {media.locked ? (
+          <Text style={styles.description}>
+            {media.description ||
+              "No description available."}
+          </Text>
+
+          {media.locked ||
+          media.isPremium ? (
             <TouchableOpacity
-              style={
-                styles.playButton
-              }
+              style={styles.secondaryButton}
               onPress={() =>
-                alert(
-                  "Premium subscription required"
+                Alert.alert(
+                  "Premium content",
+                  "Upgrade to Premium to watch this content."
                 )
               }
             >
-              <Text
-                style={
-                  styles.playText
-                }
-              >
-                🔒 Premium
-                Content
+              <Text style={styles.secondaryText}>
+                Premium Required
               </Text>
             </TouchableOpacity>
           ) : (
-            <>
-              {/* Play */}
+            <View style={styles.actions}>
               <TouchableOpacity
-                style={
-                  styles.playButton
+                style={styles.primaryButton}
+                onPress={() =>
+                  playItem(media)
                 }
-                onPress={() => {
-                  setQueue(
-                    [
-                      {
-                        mediaId:
-                          media._id,
-
-                        title:
-                          media.title,
-
-                        videoUrl:
-                          media.videoUrl,
-                      },
-                    ],
-                    0
-                  );
-
-                  router.push(
-                    {
-                      pathname:
-                        "/player",
-
-                      params:
-                        {
-                          mediaId:
-                            media._id,
-
-                          videoUrl:
-                            media.videoUrl,
-
-                          title:
-                            media.title,
-                        },
-                    }
-                  );
-                }}
               >
-                <Text
-                  style={
-                    styles.playText
-                  }
-                >
-                  ▶ Play
+                <Text style={styles.primaryText}>
+                  Play
                 </Text>
               </TouchableOpacity>
 
-              {/* Like */}
               <TouchableOpacity
-                style={
-                  styles.playButton
-                }
-                onPress={async () => {
-                  try {
-                    const result =
-                      await toggleLike(
-                        media._id
-                      );
-
-                    setLiked(
-                      result.liked
-                    );
-                  } catch (
-                    err
-                  ) {
-                    console.log(
-                      err
-                    );
-                  }
-                }}
+                style={styles.secondaryButton}
+                onPress={handleFavorite}
               >
-                <Text
-                  style={
-                    styles.playText
-                  }
-                >
+                <Text style={styles.secondaryText}>
+                  Favorite
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handleLike}
+              >
+                <Text style={styles.secondaryText}>
                   {liked
-                    ? "❤️ Liked"
-                    : "🤍 Like"}
+                    ? "Liked"
+                    : "Like"}
                 </Text>
               </TouchableOpacity>
+            </View>
+          )}
 
-              {/* Comment Input */}
+          {episodes.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                Episodes
+              </Text>
+              {episodes.map((item) => (
+                <TouchableOpacity
+                  key={item._id}
+                  style={styles.episode}
+                  onPress={() =>
+                    playItem(item)
+                  }
+                >
+                  <Text
+                    style={styles.episodeTitle}
+                    numberOfLines={2}
+                  >
+                    S
+                    {
+                      item.seriesInfo
+                        ?.seasonNumber
+                    }
+                    E
+                    {
+                      item.seriesInfo
+                        ?.episodeNumber
+                    }{" "}
+                    {
+                      item.seriesInfo
+                        ?.episodeTitle ||
+                      item.title
+                    }
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              Comments
+            </Text>
+            <View style={styles.commentBox}>
               <TextInput
-                value={
-                  commentText
-                }
+                value={commentText}
                 onChangeText={
                   setCommentText
                 }
                 placeholder="Add a comment..."
-                placeholderTextColor="#999"
-                style={
-                  styles.input
+                placeholderTextColor={
+                  AppTheme.colors.textSubtle
                 }
+                style={styles.input}
               />
-
-              {/* Post Comment */}
               <TouchableOpacity
-                style={
-                  styles.playButton
-                }
-                onPress={async () => {
-                  try {
-                    if (
-                      !commentText.trim()
-                    ) {
-                      return;
-                    }
-
-                    await addComment(
-                      media._id,
-                      commentText
-                    );
-
-                    setCommentText(
-                      ""
-                    );
-
-                    const updated =
-                      await getComments(
-                        media._id
-                      );
-
-                    setComments(
-                      updated
-                    );
-                  } catch (
-                    err
-                  ) {
-                    console.log(
-                      err
-                    );
-                  }
-                }}
+                style={styles.postButton}
+                onPress={handleComment}
               >
-                <MediaRow
-  title="Because You Watched This"
-  data={similar}
-/>
-                <Text
-                  style={
-                    styles.playText
-                  }
-                >
+                <Text style={styles.postText}>
                   Post
-                  Comment
                 </Text>
               </TouchableOpacity>
-            </>
-          )}
+            </View>
+          </View>
         </>
       }
-      renderItem={({
-        item,
-      }) => (
-        <View
-          style={{
-            marginTop: 15,
-          }}
-        >
-          <Text
-            style={{
-              color:
-                "#FFF",
-              fontWeight:
-                "700",
-            }}
-          >
-            {
-              item.userId
-                ?.name
-            }
+      renderItem={({ item }) => (
+        <View style={styles.comment}>
+          <Text style={styles.commentName}>
+            {item.userId?.name ||
+              item.username ||
+              "Viewer"}
           </Text>
-
-          <Text
-            style={{
-              color:
-                "#DDD",
-            }}
-          >
-            {item.text}
+          <Text style={styles.commentText}>
+            {item.text ||
+              item.message}
           </Text>
         </View>
       )}
+      ListEmptyComponent={
+        <Text style={styles.emptyText}>
+          No comments yet.
+        </Text>
+      }
       ListFooterComponent={
-        <View
-          style={{
-            height: 30,
-          }}
+        <MediaRow
+          title="Because You Watched This"
+          data={similar}
         />
       }
     />
@@ -526,70 +517,225 @@ const styles =
     container: {
       flex: 1,
       backgroundColor:
-        "#0D0D0D",
-      padding: 20,
+        AppTheme.colors.background,
     },
 
-    loadingContainer:
-      {
-        flex: 1,
-        justifyContent:
-          "center",
-        alignItems:
-          "center",
-        backgroundColor:
-          "#0D0D0D",
-      },
-
-    loadingText: {
-      color: "#fff",
-      fontSize: 18,
+    content: {
+      paddingBottom: 90,
     },
 
-    poster: {
-      width: "100%",
-      height: 350,
-      borderRadius: 20,
+    hero: {
+      minHeight: 420,
+      justifyContent: "flex-end",
+      backgroundColor:
+        AppTheme.colors.surface,
+    },
+
+    heroImage: {
+      opacity: 0.88,
+    },
+
+    heroShade: {
+      padding: AppTheme.spacing.xl,
+      paddingTop: 120,
+      backgroundColor:
+        "rgba(7,8,10,0.62)",
+    },
+
+    kicker: {
+      color: AppTheme.colors.accent,
+      fontSize: AppTheme.typography.kicker.fontSize,
+      fontWeight: AppTheme.typography.kicker.fontWeight,
+      letterSpacing: AppTheme.typography.kicker.letterSpacing,
+      textTransform: "uppercase",
+      marginBottom: AppTheme.spacing.md,
     },
 
     title: {
-      color: "#fff",
-      fontSize: 28,
-      fontWeight: "700",
-      marginTop: 15,
+      color: AppTheme.colors.text,
+      fontSize: AppTheme.typography.display.fontSize,
+      fontWeight: AppTheme.typography.display.fontWeight,
+      lineHeight: AppTheme.typography.display.lineHeight,
     },
 
     meta: {
-      color: "#aaa",
+      color:
+        AppTheme.colors.textMuted,
       marginTop: 10,
+      lineHeight: 20,
     },
 
     description: {
-      color: "#ddd",
-      marginTop: 15,
+      color: AppTheme.colors.text,
+      fontSize: AppTheme.typography.body.fontSize,
+      lineHeight: AppTheme.typography.body.lineHeight,
+      paddingHorizontal: AppTheme.spacing.lg,
+      paddingTop: AppTheme.spacing.lg,
     },
 
-    playButton: {
+    actions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: AppTheme.spacing.md,
+      paddingHorizontal: AppTheme.spacing.lg,
+      paddingTop: AppTheme.spacing.lg,
+    },
+
+    primaryButton: {
+      minHeight: 48,
+      alignItems: "center",
+      justifyContent: "center",
       backgroundColor:
-        "#6C5CE7",
-      padding: 16,
-      borderRadius: 12,
-      marginTop: 20,
+        AppTheme.colors.accent,
+      paddingHorizontal: 20,
+      borderRadius:
+        AppTheme.radius.md,
     },
 
-    playText: {
-      color: "#fff",
-      textAlign:
-        "center",
-      fontWeight: "700",
+    primaryText: {
+      color:
+        AppTheme.colors.background,
+      fontWeight: "900",
+    },
+
+    secondaryButton: {
+      minHeight: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor:
+        AppTheme.colors.surface,
+      borderColor:
+        AppTheme.colors.border,
+      borderWidth: 1,
+      paddingHorizontal: 18,
+      borderRadius:
+        AppTheme.radius.md,
+    },
+
+    secondaryText: {
+      color: AppTheme.colors.text,
+      fontWeight: "800",
+    },
+
+    section: {
+      paddingHorizontal: AppTheme.spacing.lg,
+      paddingTop: AppTheme.spacing.xxl,
+    },
+
+    sectionTitle: {
+      color: AppTheme.colors.text,
+      fontSize: AppTheme.typography.heading.fontSize,
+      fontWeight: AppTheme.typography.heading.fontWeight,
+      marginBottom: AppTheme.spacing.md,
+    },
+
+    episode: {
+      padding: 15,
+      borderRadius:
+        AppTheme.radius.md,
+      backgroundColor:
+        AppTheme.colors.surface,
+      borderColor:
+        AppTheme.colors.border,
+      borderWidth: 1,
+      marginBottom: 10,
+    },
+
+    episodeTitle: {
+      color: AppTheme.colors.text,
+      fontWeight: "800",
+      lineHeight: 20,
+    },
+
+    commentBox: {
+      flexDirection: "row",
+      gap: 10,
     },
 
     input: {
+      flex: 1,
+      minHeight: 48,
       backgroundColor:
-        "#1A1A1A",
-      color: "#FFF",
-      borderRadius: 12,
-      padding: 16,
-      marginTop: 20,
+        AppTheme.colors.input,
+      color: AppTheme.colors.text,
+      borderRadius:
+        AppTheme.radius.md,
+      borderWidth: 1,
+      borderColor:
+        AppTheme.colors.border,
+      paddingHorizontal: AppTheme.spacing.lg,
+    },
+
+    postButton: {
+      minHeight: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 18,
+      borderRadius:
+        AppTheme.radius.md,
+      backgroundColor:
+        AppTheme.colors.surfaceSoft,
+    },
+
+    postText: {
+      color: AppTheme.colors.text,
+      fontWeight: "900",
+    },
+
+    comment: {
+      marginHorizontal: AppTheme.spacing.lg,
+      marginTop: AppTheme.spacing.md,
+      padding: AppTheme.spacing.lg,
+      borderRadius:
+        AppTheme.radius.md,
+      backgroundColor:
+        AppTheme.colors.surface,
+      borderColor:
+        AppTheme.colors.border,
+      borderWidth: 1,
+    },
+
+    commentName: {
+      color: AppTheme.colors.accent,
+      fontWeight: "900",
+      marginBottom: 4,
+    },
+
+    commentText: {
+      color:
+        AppTheme.colors.textMuted,
+      lineHeight: 20,
+    },
+
+    emptyText: {
+      color:
+        AppTheme.colors.textSubtle,
+      marginHorizontal: 20,
+      marginTop: 12,
+      marginBottom: 20,
+    },
+
+    state: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor:
+        AppTheme.colors.background,
+      padding: 24,
+    },
+
+    stateTitle: {
+      color: AppTheme.colors.text,
+      fontSize: AppTheme.typography.title.fontSize,
+      fontWeight: AppTheme.typography.title.fontWeight,
+      marginBottom: AppTheme.spacing.md,
+    },
+
+    stateText: {
+      color:
+        AppTheme.colors.textMuted,
+      textAlign: "center",
+      marginTop: 10,
+      marginBottom: 12,
     },
   });

@@ -8,6 +8,7 @@ import {
   Text,
   StyleSheet,
 } from "react-native";
+import { AppTheme } from "../constants/theme";
 
 interface Props {
   scheduledFor: string | Date;
@@ -24,68 +25,69 @@ export default function LiveCountdown({
   ] = useState("");
 
   useEffect(() => {
-    const interval =
-      setInterval(() => {
-        const target =
-          new Date(
-            scheduledFor
-          ).getTime();
+    const update = () => {
+      const target =
+        new Date(
+          scheduledFor
+        ).getTime();
 
-        const now =
-          Date.now();
+      const diff =
+        target - Date.now();
 
-        const diff =
-          target - now;
+      if (diff <= 0) {
+        setTimeLeft("Live now");
+        return;
+      }
 
-        if (diff <= 0) {
-          setTimeLeft(
-            "🔴 LIVE NOW"
-          );
-          return;
-        }
-
-        const days =
-          Math.floor(
-            diff /
-              (1000 *
-                60 *
-                60 *
-                24)
-          );
-
-        const hours =
-          Math.floor(
-            (diff %
-              (1000 *
-                60 *
-                60 *
-                24)) /
-              (1000 *
-                60 *
-                60)
-          );
-
-        const minutes =
-          Math.floor(
-            (diff %
-              (1000 *
-                60 *
-                60)) /
-              (1000 * 60)
-          );
-
-        const seconds =
-          Math.floor(
-            (diff %
-              (1000 *
-                60)) /
-              1000
-          );
-
-        setTimeLeft(
-          `${days}d ${hours}h ${minutes}m ${seconds}s`
+      const days =
+        Math.floor(
+          diff /
+            (1000 *
+              60 *
+              60 *
+              24)
         );
-      }, 1000);
+
+      const hours =
+        Math.floor(
+          (diff %
+            (1000 *
+              60 *
+              60 *
+              24)) /
+            (1000 *
+              60 *
+              60)
+        );
+
+      const minutes =
+        Math.floor(
+          (diff %
+            (1000 *
+              60 *
+              60)) /
+            (1000 * 60)
+        );
+
+      const seconds =
+        Math.floor(
+          (diff %
+            (1000 * 60)) /
+            1000
+        );
+
+      setTimeLeft(
+        `${days}d ${hours}h ${minutes}m ${seconds}s`
+      );
+    };
+
+    update();
+
+    const interval =
+      setInterval(
+        update,
+        1000
+      );
 
     return () =>
       clearInterval(
@@ -94,24 +96,12 @@ export default function LiveCountdown({
   }, [scheduledFor]);
 
   return (
-    <View
-      style={
-        styles.container
-      }
-    >
-      <Text
-        style={
-          styles.label
-        }
-      >
-        📅 Starts in
+    <View style={styles.container}>
+      <Text style={styles.label}>
+        {prefix}
       </Text>
 
-      <Text
-        style={
-          styles.time
-        }
-      >
+      <Text style={styles.time}>
         {timeLeft}
       </Text>
     </View>
@@ -121,19 +111,18 @@ export default function LiveCountdown({
 const styles =
   StyleSheet.create({
     container: {
-      marginLeft: 10,
       marginBottom: 6,
     },
 
     label: {
-      color: "#FFD54F",
-      fontWeight: "700",
+      color: AppTheme.colors.accent,
+      fontWeight: "800",
       fontSize: 12,
     },
 
     time: {
-      color: "#FFF",
-      fontWeight: "700",
+      color: AppTheme.colors.text,
+      fontWeight: "800",
       fontSize: 15,
       marginTop: 2,
     },

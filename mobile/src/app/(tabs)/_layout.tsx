@@ -1,4 +1,5 @@
 import { Tabs } from "expo-router";
+import { AppTheme } from "../../constants/theme";
 
 export default function TabsLayout() {
   return (
@@ -6,11 +7,22 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: "#111",
-          borderTopColor: "#222",
+          backgroundColor:
+            AppTheme.colors.backgroundElevated,
+          borderTopColor:
+            AppTheme.colors.border,
+          height: 68,
+          paddingTop: 8,
+          paddingBottom: 10,
         },
-        tabBarActiveTintColor: "#6C5CE7",
-        tabBarInactiveTintColor: "#888",
+        tabBarActiveTintColor:
+          AppTheme.colors.accent,
+        tabBarInactiveTintColor:
+          AppTheme.colors.textSubtle,
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: "700",
+        },
       }}
     >
       <Tabs.Screen

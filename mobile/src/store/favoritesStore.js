@@ -6,10 +6,15 @@ export const useFavoritesStore =
 
     addFavorite: (media) =>
       set((state) => {
+        const mediaId =
+          media.id || media._id;
+
         const exists =
           state.favorites.find(
             (item) =>
-              item.id === media.id
+              (item.id ||
+                item._id) ===
+              mediaId
           );
 
         if (exists)
@@ -28,7 +33,13 @@ export const useFavoritesStore =
         favorites:
           state.favorites.filter(
             (item) =>
-              item.id !== id
+              (item.id ||
+                item._id) !== id
           ),
       })),
+
+    clearFavorites: () =>
+      set({
+        favorites: [],
+      }),
   }));

@@ -15,33 +15,44 @@ const {
   "../controllers/notificationController"
 );
 
+const authMiddleware =
+  require(
+    "../middleware/authMiddleware"
+  );
+
 router.post(
   "/register-token",
+  authMiddleware,
   registerPushToken
 );
 
 router.post(
   "/notify-me",
+  authMiddleware,
   notifyMe
 );
 
 router.get(
-  "/:userId",
+  "/",
+  authMiddleware,
   getNotifications
 );
 
 router.put(
   "/read/:id",
+  authMiddleware,
   markRead
 );
 
 router.put(
-  "/read-all/:userId",
+  "/read-all",
+  authMiddleware,
   markAllRead
 );
 
 router.delete(
   "/:id",
+  authMiddleware,
   deleteNotification
 );
 

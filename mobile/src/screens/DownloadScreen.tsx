@@ -3,12 +3,12 @@ import React, {
 } from "react";
 
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
   Alert,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import {
@@ -21,6 +21,7 @@ import {
 
 import * as FileSystem
   from "expo-file-system";
+import { AppTheme } from "../constants/theme";
 
 export default function DownloadScreen() {
   const downloads =
@@ -58,10 +59,7 @@ export default function DownloadScreen() {
 
           {
             text: "Delete",
-
-            style:
-              "destructive",
-
+            style: "destructive",
             onPress:
               async () => {
                 try {
@@ -70,9 +68,7 @@ export default function DownloadScreen() {
                       id
                     );
 
-                  if (
-                    item?.uri
-                  ) {
+                  if (item?.uri) {
                     const info =
                       await FileSystem.getInfoAsync(
                         item.uri
@@ -111,6 +107,9 @@ export default function DownloadScreen() {
 
   return (
     <View style={styles.container}>
+      <Text style={styles.kicker}>
+        Library
+      </Text>
       <Text style={styles.title}>
         Downloads
       </Text>
@@ -120,114 +119,136 @@ export default function DownloadScreen() {
         keyExtractor={(item) =>
           item.id
         }
+        contentContainerStyle={
+          styles.list
+        }
         ListEmptyComponent={
-          <Text
-            style={styles.empty}
-          >
-            No downloads yet
+          <Text style={styles.empty}>
+            Downloaded titles will appear here for offline playback.
           </Text>
         }
-       renderItem={({ item }) => (
-  <View style={styles.card}>
-    <TouchableOpacity
-      onPress={() =>
-        router.push({
-          pathname: "/player",
-          params: {
-            mediaId: item.id,
-            title: item.title,
-            localUri: item.uri,
-          },
-        })
-      }
-    >
-      <Text
-        style={styles.mediaTitle}
-      >
-        {item.title}
-      </Text>
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.cardCopy}
+              activeOpacity={0.78}
+              onPress={() =>
+                router.push({
+                  pathname: "/player",
+                  params: {
+                    mediaId: item.id,
+                    title: item.title,
+                    localUri: item.uri,
+                  },
+                })
+              }
+            >
+              <Text
+                style={styles.mediaTitle}
+                numberOfLines={2}
+              >
+                {item.title}
+              </Text>
 
-      <Text
-        style={styles.uri}
-        numberOfLines={1}
-      >
-        Downloaded Offline
-      </Text>
-    </TouchableOpacity>
+              <Text style={styles.uri}>
+                Available offline
+              </Text>
+            </TouchableOpacity>
 
-    <TouchableOpacity
-      style={styles.deleteBtn}
-      onPress={() =>
-        handleDelete(item.id)
-      }
-    >
-      <Text
-        style={styles.deleteText}
-      >
-        Remove Download
-      </Text>
-    </TouchableOpacity>
-  </View>
+            <TouchableOpacity
+              style={styles.deleteBtn}
+              onPress={() =>
+                handleDelete(item.id)
+              }
+            >
+              <Text style={styles.deleteText}>
+                Remove
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
       />
     </View>
   );
 }
 
-const styles =
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor:
-        "#0D0D0D",
-      padding: 20,
-    },
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: AppTheme.colors.background,
+    padding: AppTheme.spacing.lg,
+  },
 
-    title: {
-      color: "#fff",
-      fontSize: 24,
-      fontWeight: "700",
-      marginBottom: 20,
-    },
+  kicker: {
+    color: AppTheme.colors.accent,
+    fontSize: AppTheme.typography.kicker.fontSize,
+    fontWeight: AppTheme.typography.kicker.fontWeight,
+    letterSpacing: AppTheme.typography.kicker.letterSpacing,
+    textTransform: "uppercase",
+    marginTop: AppTheme.spacing.md,
+  },
 
-    empty: {
-      color: "#AAA",
-      textAlign: "center",
-      marginTop: 50,
-    },
+  title: {
+    color: AppTheme.colors.text,
+    fontSize: 30,
+    fontWeight: "900",
+    marginTop: 4,
+    marginBottom: AppTheme.spacing.xl,
+  },
 
-    card: {
-      backgroundColor:
-        "#1A1A1A",
-      padding: 15,
-      borderRadius: 12,
-      marginBottom: 12,
-    },
+  list: {
+    paddingBottom: 96,
+  },
 
-    mediaTitle: {
-      color: "#FFF",
-      fontSize: 16,
-      fontWeight: "600",
-    },
+  empty: {
+    color: AppTheme.colors.textMuted,
+    textAlign: "center",
+    marginTop: 44,
+    lineHeight: 21,
+  },
 
-    uri: {
-      color: "#999",
-      marginTop: 5,
-      fontSize: 12,
-    },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: AppTheme.colors.surface,
+    borderColor: AppTheme.colors.border,
+    borderWidth: 1,
+    padding: 16,
+    borderRadius: AppTheme.radius.md,
+    marginBottom: 12,
+  },
 
-    deleteBtn: {
-      marginTop: 12,
-      backgroundColor:
-        "#C0392B",
-      padding: 10,
-      borderRadius: 8,
-    },
+  cardCopy: {
+    flex: 1,
+  },
 
-    deleteText: {
-      color: "#FFF",
-      textAlign:
-        "center",
-      fontWeight: "600",
-    },
-  });
+  mediaTitle: {
+    color: AppTheme.colors.text,
+    fontSize: AppTheme.typography.subtitle.fontSize,
+    fontWeight: "900",
+    lineHeight: 21,
+  },
+
+  uri: {
+    color: AppTheme.colors.textSubtle,
+    marginTop: 5,
+    fontSize: 12,
+  },
+
+  deleteBtn: {
+    minHeight: 40,
+    justifyContent: "center",
+    backgroundColor: "rgba(225,91,100,0.16)",
+    borderColor: AppTheme.colors.danger,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    borderRadius: AppTheme.radius.sm,
+  },
+
+  deleteText: {
+    color: AppTheme.colors.text,
+    textAlign: "center",
+    fontWeight: "900",
+  },
+});

@@ -9,7 +9,9 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
 } from "react-native";
+import { router } from "expo-router";
 
 import {
   useWatchStore,
@@ -18,6 +20,7 @@ import {
 import {
   continueWatching,
 } from "../api/watchApi";
+import { AppTheme } from "../constants/theme";
 
 export default function ContinueWatchingRow() {
   // Local Zustand data
@@ -62,8 +65,16 @@ export default function ContinueWatchingRow() {
             renderItem={({
               item,
             }) => (
-              <View
+              <TouchableOpacity
                 style={styles.card}
+                onPress={() =>
+                  router.push({
+                    pathname: "/details",
+                    params: {
+                      id: item.id,
+                    },
+                  })
+                }
               >
                 <Text
                   style={
@@ -80,7 +91,7 @@ export default function ContinueWatchingRow() {
                 >
                   {item.progress}%
                 </Text>
-              </View>
+              </TouchableOpacity>
             )}
           />
         </>
@@ -103,10 +114,20 @@ export default function ContinueWatchingRow() {
           >
             {items.map(
               (item) => (
-                <View
+                <TouchableOpacity
                   key={item._id}
                   style={
                     styles.card
+                  }
+                  onPress={() =>
+                    router.push({
+                      pathname: "/details",
+                      params: {
+                        id:
+                          item.media?._id ||
+                          item.media,
+                      },
+                    })
                   }
                 >
                   <Text
@@ -130,7 +151,7 @@ export default function ContinueWatchingRow() {
                     }
                     %
                   </Text>
-                </View>
+                </TouchableOpacity>
               )
             )}
           </ScrollView>
@@ -160,7 +181,10 @@ const styles =
     card: {
       width: 160,
       backgroundColor:
-        "#222",
+        AppTheme.colors.surface,
+      borderWidth: 1,
+      borderColor:
+        AppTheme.colors.border,
       borderRadius: 12,
       padding: 15,
       marginHorizontal: 10,
@@ -172,7 +196,7 @@ const styles =
     },
 
     progress: {
-      color: "#6C5CE7",
+      color: AppTheme.colors.accent,
       marginTop: 10,
     },
   });

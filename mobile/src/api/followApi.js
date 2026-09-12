@@ -2,14 +2,12 @@ import { api } from "./client";
 
 export const followCreator =
   async (
-    userId,
     creatorId
   ) => {
     const response =
       await api.post(
         "/follows/follow",
         {
-          userId,
           creatorId,
         }
       );
@@ -19,14 +17,12 @@ export const followCreator =
 
 export const unfollowCreator =
   async (
-    userId,
     creatorId
   ) => {
     const response =
       await api.post(
         "/follows/unfollow",
         {
-          userId,
           creatorId,
         }
       );

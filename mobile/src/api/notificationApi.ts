@@ -2,23 +2,21 @@ import client from "./client";
 
 export const registerPushToken =
   (
-    userId: string,
     token: string,
     platform: string
   ) =>
     client.post(
       "/notifications/register-token",
       {
-        userId,
         token,
         platform,
       }
     );
 
 export const getNotifications =
-  (userId: string) =>
+  () =>
     client.get(
-      `/notifications/${userId}`
+      "/notifications"
     );
 
 export const markRead =
@@ -28,9 +26,9 @@ export const markRead =
     );
 
 export const markAllRead =
-  (userId: string) =>
+  () =>
     client.put(
-      `/notifications/read-all/${userId}`
+      "/notifications/read-all"
     );
 
 export const deleteNotification =
@@ -40,14 +38,10 @@ export const deleteNotification =
     );
 
 export const notifyMe =
-  (
-    streamId: string,
-    userId: string
-  ) =>
+  (streamId: string) =>
     client.post(
       "/notifications/notify-me",
       {
         streamId,
-        userId,
       }
     );

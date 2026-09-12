@@ -122,4 +122,15 @@ export const useDownloadStore =
 
     return item;
   },
+
+  clearDownloads:
+    async () => {
+      set({
+        downloads: [],
+      });
+
+      await AsyncStorage.removeItem(
+        STORAGE_KEY
+      );
+    },
   }));
