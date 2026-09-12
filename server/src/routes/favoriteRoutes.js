@@ -4,6 +4,7 @@ const express =
 const {
   addFavorite,
   getFavorites,
+  removeFavorite,
 } = require(
   "../controllers/favoriteController"
 );
@@ -26,6 +27,12 @@ router.get(
   "/",
   authMiddleware,
   getFavorites
+);
+
+router.delete(
+  "/:mediaId",
+  authMiddleware,
+  removeFavorite
 );
 
 module.exports = router;

@@ -21,6 +21,7 @@ import {
 } from "../store/favoritesStore";
 import {
   getFavorites,
+  removeFavorite as removeFavoriteApi,
 } from "../api/favoriteApi";
 import { AppTheme } from "../constants/theme";
 
@@ -177,23 +178,34 @@ export default function FavoritesScreen() {
                 </Text>
               </View>
 
-              {item.favoriteSource ===
-                "local" && (
-                <TouchableOpacity
-                  style={styles.removeBtn}
-                  onPress={() =>
+              <TouchableOpacity
+                style={styles.removeBtn}
+                onPress={async () => {
+                  try {
+                    if (
+                      item.favoriteSource ===
+                      "server"
+                    ) {
+                      await removeFavoriteApi(
+                        item.mediaId
+                      );
+                    }
                     removeFavorite(
                       item.mediaId
-                    )
+                    );
+                  } catch (err) {
+                    console.log(
+                      err
+                    );
                   }
+                }}
+              >
+                <Text
+                  style={styles.removeText}
                 >
-                  <Text
-                    style={styles.removeText}
-                  >
-                    Remove
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  Remove
+                </Text>
+              </TouchableOpacity>
             </TouchableOpacity>
           )}
         />

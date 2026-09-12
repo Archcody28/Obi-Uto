@@ -25,6 +25,12 @@ const favoriteSchema =
     }
   );
 
+// Prevent duplicate favorites for the same user+media pair
+favoriteSchema.index(
+  { user: 1, media: 1 },
+  { unique: true }
+);
+
 module.exports =
   mongoose.model(
     "Favorite",

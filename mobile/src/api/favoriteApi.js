@@ -22,3 +22,13 @@ export const getFavorites =
 
     return response.data;
   };
+
+export const removeFavorite =
+  async (mediaId) => {
+    const response =
+      await api.delete(
+        `/favorites/${mediaId}`
+      );
+
+    return response.data;
+  };
