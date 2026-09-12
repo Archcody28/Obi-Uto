@@ -34,6 +34,7 @@ const mediaServer =
   require("./streaming/mediaServer");
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 
 const connectDB = require("./config/db");
 
@@ -123,6 +124,14 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+// Security headers
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // API-only, no browser CSP needed
+    crossOriginEmbedderPolicy: false, // Allow media embeds
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin media
+  })
+);
 // Skip express.json() for webhook route (needs raw body for signature verification)
 app.use((req, res, next) => {
   if (
