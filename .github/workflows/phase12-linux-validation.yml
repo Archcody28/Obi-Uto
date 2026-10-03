@@ -1,0 +1,257 @@
+name: phase-12-linux-validation
+
+# Phase 12: Linux staging runtime & release validation.
+# Runs the backend in a production-like Linux environment with MongoDB,
+# executes the runtime E2E smoke harness, verifies graceful shutdown,
+# audits case-sensitive imports, and validates the mobile TypeScript/ESLint state.
+
+on:
+  push:
+    branches: [master, phase-12-ci]
+  workflow_dispatch:
+
+jobs:
+  backend-linux:
+    name: Backend Linux runtime (Node 22 + MongoDB 7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: production
+      MONGO_URI: mongodb://127.0.0.1:27017/mediaapp
+      JWT_SECRET: phase12-ci-jwt-secret-0123456789abcdef
+      MEDIA_BASE_URL: http://localhost:8000
+      ALLOWED_ORIGINS: http://allowed.test
+      PAYSTACK_SECRET_KEY: sk_test_phase12_ci_placeholder
+      FFMPEG_PATH: /usr/bin/ffmpeg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Record environment
+        run: |
+          node --version
+          npm --version
+          cat /etc/os-release | head -n 2
+
+      - name: Install backend dependencies (npm ci)
+        working-directory: server
+        run: npm ci
+
+      - name: Install Socket.IO client for smoke harness
+        run: npm install --no-save socket.io-client
+
+      - name: Case-sensitive import audit (exact-case resolver)
+        run: node validation/phase12/case-audit.js server/src mobile/src
+
+      - name: Backend syntax validation (node --check)
+        run: |
+          count=0
+          while IFS= read -r -d '' f; do
+            node --check "$f"
+            count=$((count + 1))
+          done < <(find server/src -name '*.js' -print0)
+          echo "node --check: $count files, 0 failures"
+
+      - name: Production module load (NODE_ENV=production)
+        working-directory: server
+        run: node ../validation/phase12/module-load.js src
+
+      - name: Seed test data (existing seed scripts)
+        working-directory: server
+        run: |
+          npm run seed
+          npm run seed-plans
+
+      - name: Production startup, runtime E2E and graceful shutdown
+        run: |
+          set -e
+          cd server
+          node src/index.js > "$RUNNER_TEMP/server.log" 2>&1 &
+          SERVER_PID=$!
+
+          echo "Waiting for health..."
+          for i in $(seq 1 45); do
+            if curl -sf http://127.0.0.1:5000/health > "$RUNNER_TEMP/health.json"; then
+              break
+            fi
+            sleep 1
+          done
+          echo "Health response:"
+          cat "$RUNNER_TEMP/health.json"
+          node -e '
+            const fs = require("fs");
+            const h = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            if (h.status !== "ok" || h.database.readyState !== 1) {
+              console.error("HEALTH FAILED", h);
+              process.exit(1);
+            }
+            console.log("HEALTH OK: status=ok database.readyState=1");
+          ' "$RUNNER_TEMP/health.json"
+
+          echo "Running runtime E2E smoke harness..."
+          cd "$GITHUB_WORKSPACE"
+          REPO_ROOT="$GITHUB_WORKSPACE" SMOKE_BASE_URL=http://127.0.0.1:5000 \
+            node validation/phase12/smoke.js
+
+          echo "Sending SIGTERM (graceful shutdown)..."
+          kill -TERM "$SERVER_PID"
+          set +e
+          wait "$SERVER_PID"
+          EXIT_CODE=$?
+          set -e
+          echo "Server exit code: $EXIT_CODE"
+          echo "--- server.log ---"
+          cat "$RUNNER_TEMP/server.log"
+          grep -q "SIGTERM received. Shutting down gracefully..." "$RUNNER_TEMP/server.log"
+          grep -q "HTTP server closed" "$RUNNER_TEMP/server.log"
+          grep -q "MongoDB connection closed" "$RUNNER_TEMP/server.log"
+          test "$EXIT_CODE" -eq 0
+          echo "GRACEFUL SHUTDOWN OK"
+
+      - name: Production URL audit (LAN IP classification)
+        run: |
+          echo "References to 192.168.42.43 (must be development fallback / docs only):"
+          git grep -n "192.168.42.43" || echo "(none)"
+
+  docker-linux:
+    name: Docker image build + run + health + E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NODE_ENV: production
+      MONGO_URI: mongodb://127.0.0.1:27017/mediaapp
+      JWT_SECRET: phase12-ci-jwt-secret-0123456789abcdef
+      MEDIA_BASE_URL: http://localhost:8000
+      ALLOWED_ORIGINS: http://allowed.test
+      PAYSTACK_SECRET_KEY: sk_test_phase12_ci_placeholder
+      FFMPEG_PATH: /usr/bin/ffmpeg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Build existing backend Docker image
+        run: docker build -t obi-uto-server ./server
+
+      - name: Run container with production configuration
+        run: |
+          set -e
+          docker run -d --network host --name obi-uto-server \
+            -e NODE_ENV="$NODE_ENV" \
+            -e MONGO_URI="$MONGO_URI" \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e MEDIA_BASE_URL="$MEDIA_BASE_URL" \
+            -e ALLOWED_ORIGINS="$ALLOWED_ORIGINS" \
+            -e PAYSTACK_SECRET_KEY="$PAYSTACK_SECRET_KEY" \
+            -e FFMPEG_PATH="$FFMPEG_PATH" \
+            obi-uto-server
+          sleep 3
+          docker ps -a
+          docker logs obi-uto-server
+
+      - name: Seed test data inside container
+        run: |
+          docker exec obi-uto-server node src/utils/seedMedia.js
+          docker exec obi-uto-server node src/utils/seedPlans.js
+
+      - name: Install smoke harness dependencies
+        run: |
+          npm install --no-save socket.io-client
+          npm ci --prefix server
+
+      - name: Container health, runtime E2E and graceful stop
+        run: |
+          set -e
+          for i in $(seq 1 45); do
+            if curl -sf http://127.0.0.1:5000/health > "$RUNNER_TEMP/docker-health.json"; then
+              break
+            fi
+            sleep 1
+          done
+          echo "Health response:"
+          cat "$RUNNER_TEMP/docker-health.json"
+          node -e '
+            const fs = require("fs");
+            const h = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            if (h.status !== "ok" || h.database.readyState !== 1) {
+              console.error("HEALTH FAILED", h);
+              process.exit(1);
+            }
+            console.log("CONTAINER HEALTH OK");
+          ' "$RUNNER_TEMP/docker-health.json"
+
+          echo "Running runtime E2E smoke harness against container..."
+          REPO_ROOT="$GITHUB_WORKSPACE" SMOKE_BASE_URL=http://127.0.0.1:5000 \
+            node validation/phase12/smoke.js
+
+          echo "docker stop (SIGTERM graceful stop)..."
+          set +e
+          docker stop obi-uto-server
+          STOP_CODE=$?
+          set -e
+          EXIT_CODE=$(docker inspect -f '{{.State.ExitCode}}' obi-uto-server)
+          echo "docker stop exit: $STOP_CODE, container exit code: $EXIT_CODE"
+          echo "--- container logs ---"
+          docker logs obi-uto-server > "$RUNNER_TEMP/docker.log" 2>&1
+          cat "$RUNNER_TEMP/docker.log"
+          grep -q "SIGTERM received. Shutting down gracefully..." "$RUNNER_TEMP/docker.log"
+          grep -q "HTTP server closed" "$RUNNER_TEMP/docker.log"
+          grep -q "MongoDB connection closed" "$RUNNER_TEMP/docker.log"
+          test "$EXIT_CODE" -eq 0
+          echo "DOCKER GRACEFUL SHUTDOWN OK"
+
+  mobile-linux:
+    name: Mobile TypeScript + ESLint (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies (npm ci)
+        working-directory: mobile
+        run: npm ci
+
+      - name: TypeScript
+        working-directory: mobile
+        run: npx tsc --noEmit --pretty false
+
+      - name: ESLint (existing lint script)
+        working-directory: mobile
+        run: npm run lint
+
+

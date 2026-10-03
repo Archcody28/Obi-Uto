@@ -114,8 +114,8 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    // In production with no allowlist configured, deny
-    if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+    // In production, deny any origin that is not allowlisted
+    if (process.env.NODE_ENV === "production") {
       return callback(new Error("CORS not allowed"));
     }
 
@@ -267,15 +267,22 @@ function shutdown(signal) {
   server.close(() => {
     console.log("HTTP server closed");
 
-    mongoose.connection.close(
-      false,
-      () => {
+    // Mongoose 8: close() returns a promise (callback form throws).
+    mongoose.connection
+      .close()
+      .then(() => {
         console.log(
           "MongoDB connection closed"
         );
         process.exit(0);
-      }
-    );
+      })
+      .catch((err) => {
+        console.error(
+          "Error closing MongoDB connection:",
+          err
+        );
+        process.exit(1);
+      });
 
     // Force exit after 10 seconds
     setTimeout(() => {
