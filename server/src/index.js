@@ -267,15 +267,22 @@ function shutdown(signal) {
   server.close(() => {
     console.log("HTTP server closed");
 
-    mongoose.connection.close(
-      false,
-      () => {
+    // Mongoose 8: close() returns a promise (callback form throws).
+    mongoose.connection
+      .close()
+      .then(() => {
         console.log(
           "MongoDB connection closed"
         );
         process.exit(0);
-      }
-    );
+      })
+      .catch((err) => {
+        console.error(
+          "Error closing MongoDB connection:",
+          err
+        );
+        process.exit(1);
+      });
 
     // Force exit after 10 seconds
     setTimeout(() => {
