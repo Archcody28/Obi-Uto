@@ -381,6 +381,13 @@ exports.handleWebhook =
           });
       }
 
+      // HMAC the raw request bytes. req.body is a Buffer here
+      // (express.raw); JSON.stringify would serialize {"type":"Buffer",...}
+      // and reject every genuine Paystack signature.
+      const rawBody = Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(JSON.stringify(req.body ?? {}));
+
       const hash =
         require("crypto")
           .createHmac(
@@ -388,7 +395,7 @@ exports.handleWebhook =
             process.env.PAYSTACK_SECRET_KEY
           )
           .update(
-            JSON.stringify(req.body)
+            rawBody
           )
           .digest("hex");
 

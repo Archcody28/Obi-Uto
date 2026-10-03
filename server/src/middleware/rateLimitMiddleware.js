@@ -1,9 +1,10 @@
 // Simple in-memory rate limiter
 // For production, consider using redis or a dedicated rate-limiting service
 
-const rateLimitStore = new Map();
-
 const rateLimit = (options = {}) => {
+  // Each limiter instance gets its own store so the auth, payment and
+  // general API limiters never consume each other's request budgets.
+  const rateLimitStore = new Map();
   const {
     windowMs = 15 * 60 * 1000, // 15 minutes
     max = 100, // max requests per window

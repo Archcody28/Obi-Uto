@@ -114,8 +114,8 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    // In production with no allowlist configured, deny
-    if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+    // In production, deny any origin that is not allowlisted
+    if (process.env.NODE_ENV === "production") {
       return callback(new Error("CORS not allowed"));
     }
 

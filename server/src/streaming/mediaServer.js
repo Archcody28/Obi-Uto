@@ -11,6 +11,33 @@ const NodeMediaServer =
 const LiveStream =
   require("../models/LiveStream");
 
+/*
+  Resolve the public media base URL once at startup.
+
+  Production must provide MEDIA_BASE_URL via the environment so playback URLs
+  are never silently built from a developer's LAN address. Only development
+  keeps a local fallback.
+*/
+function resolveMediaBaseUrl() {
+  const configured = (process.env.MEDIA_BASE_URL || "").trim();
+
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "FATAL: MEDIA_BASE_URL must be set in production and must point to the public media server URL."
+    );
+  }
+
+  // Development-only fallback for local streaming.
+  return "http://192.168.42.43:8000";
+}
+
+const mediaBaseUrl =
+  resolveMediaBaseUrl();
+
 const config = {
   rtmp: {
     port: 1935,
@@ -75,7 +102,7 @@ nms.on(
           startedAt:
             new Date(),
 
-          playbackUrl: `${process.env.MEDIA_BASE_URL || "http://192.168.42.43:8000"}/live/${streamKey}/index.m3u8`,
+          playbackUrl: `${mediaBaseUrl}/live/${streamKey}/index.m3u8`,
         }
       );
 
