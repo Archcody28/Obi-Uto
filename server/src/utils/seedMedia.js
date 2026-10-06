@@ -13,40 +13,43 @@ async function seed() {
 
     await Media.deleteMany({});
 
-    await Media.insertMany([
+        await Media.insertMany([
       {
         title: "Interstellar",
         type: "movie",
-        genre: "Sci-Fi",
+        status: "published",
+        genre: ["Sci-Fi"],
         rating: 9,
         releaseYear: 2014,
         thumbnail:
           "https://picsum.photos/300/400",
-        streamUrl:
+        videoUrl:
           "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
       },
 
       {
         title: "Breaking Bad",
         type: "series",
-        genre: "Drama",
+        status: "published",
+        genre: ["Drama"],
         rating: 10,
         releaseYear: 2008,
         thumbnail:
           "https://picsum.photos/301/400",
-        streamUrl:
+        videoUrl:
           "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
       },
 
       {
         title: "Top Hits",
         type: "music",
-        genre: "Pop",
+        status: "published",
+        genre: ["Pop"],
         rating: 8,
         releaseYear: 2025,
         thumbnail:
           "https://picsum.photos/302/400",
-        streamUrl:
+        videoUrl:
           "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
       },
     ]);

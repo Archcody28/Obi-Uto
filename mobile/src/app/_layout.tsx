@@ -10,7 +10,7 @@ import {
   useSegments,
 } from "expo-router";
 
-import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 
 import {
   Platform,
@@ -20,6 +20,11 @@ import {
 import {
   registerForPushNotifications,
 } from "../services/notificationService";
+
+// expo-notifications is unsupported in Expo Go (SDK 53+) and its module graph
+// can throw during eager route loading. Import it on demand only for
+// development builds where push notifications are available.
+const isExpoGo = !Constants.appOwnership || Constants.appOwnership === "expo";
 
 import {
   registerPushToken,
@@ -176,9 +181,19 @@ export default function RootLayout() {
 }, [user?._id]);
 
 useEffect(() => {
-  const subscription =
-    Notifications.addNotificationResponseReceivedListener(
-      (response) => {
+  if (isExpoGo) {
+    // expo-notifications push handling is unavailable in Expo Go.
+    return;
+  }
+
+  let subscription: { remove: () => void } | undefined;
+
+  void (async () => {
+    try {
+      const Notifications = await import("expo-notifications");
+      subscription =
+        Notifications.addNotificationResponseReceivedListener(
+          (response) => {
 const data =
   response.notification.request.content.data as {
     type?: string;
@@ -289,11 +304,18 @@ if (!data?.type) {
           default:
             break;
         }
-      }
+            }
     );
+    } catch (err) {
+      console.error(
+        "Failed to register notification response listener:",
+        err
+      );
+    }
+  })();
 
   return () =>
-    subscription.remove();
+    subscription?.remove();
 }, [router]);
 useEffect(() => {
   startSyncEngine();
