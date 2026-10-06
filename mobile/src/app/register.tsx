@@ -16,6 +16,7 @@ import {
 } from "expo-router";
 
 import {
+  registerUser,
   loginUser,
 } from "../api/authApi";
 
@@ -24,18 +25,19 @@ import {
 } from "../store/authStore";
 import { AppTheme } from "../constants/theme";
 
-export default function LoginScreen() {
+export default function RegisterScreen() {
   const setToken =
     useAuthStore(
-      (state) =>
-        state.setToken
+      (state) => state.setToken
     );
 
   const setUser =
     useAuthStore(
-      (state) =>
-        state.setUser
+      (state) => state.setUser
     );
+
+  const [name, setName] =
+    useState("");
 
   const [email, setEmail] =
     useState("");
@@ -50,10 +52,17 @@ export default function LoginScreen() {
     setLoading,
   ] = useState(false);
 
-  const handleLogin =
+    const handleRegister =
     async () => {
       try {
         setLoading(true);
+
+        // Registration does not return a token; log in to establish a session.
+        await registerUser(
+          name,
+          email,
+          password
+        );
 
         const response =
           await loginUser(
@@ -76,10 +85,10 @@ export default function LoginScreen() {
         console.log(err);
 
         Alert.alert(
-          "Login Failed",
+          "Registration Failed",
           err?.response?.data
             ?.message ||
-            "Unable to login"
+          "Unable to create account"
         );
       } finally {
         setLoading(false);
@@ -100,11 +109,26 @@ export default function LoginScreen() {
           styles.title
         }
       >
-        Sign in to your cinematic library.
+        Create your account.
       </Text>
       <Text style={styles.subtitle}>
-        Continue watching, manage your wallet, and stream live experiences from one account.
+        Join the cinematic library to continue watching, manage your wallet, and stream live experiences from one account.
       </Text>
+
+      <TextInput
+        placeholder="Name"
+        placeholderTextColor={
+          AppTheme.colors.textSubtle
+        }
+        style={
+          styles.input
+        }
+        value={name}
+        onChangeText={
+          setName
+        }
+        autoCapitalize="words"
+      />
 
       <TextInput
         placeholder="Email"
@@ -143,7 +167,7 @@ export default function LoginScreen() {
             styles.buttonDisabled,
         ]}
         onPress={
-          handleLogin
+          handleRegister
         }
         disabled={loading}
       >
@@ -153,8 +177,8 @@ export default function LoginScreen() {
           }
         >
           {loading
-            ? "Signing In..."
-            : "Login"}
+            ? "Creating..."
+            : "Create Account"}
         </Text>
       </TouchableOpacity>
 
@@ -163,7 +187,7 @@ export default function LoginScreen() {
           styles.linkButton
         }
         onPress={() =>
-          router.push("/register")
+          router.replace("/")
         }
       >
         <Text
@@ -171,7 +195,7 @@ export default function LoginScreen() {
             styles.linkText
           }
         >
-          Create Account
+          Already have an account? Login
         </Text>
       </TouchableOpacity>
     </View>
@@ -239,6 +263,7 @@ const styles =
         "center",
       fontWeight: "900",
     },
+
     linkButton: {
       marginTop: AppTheme.spacing.lg,
       alignItems: "center",
