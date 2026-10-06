@@ -124,15 +124,17 @@ export default function RootLayout() {
     const isIndex =
       !firstSegment;
 
-    if (!token) {
-      if (!clearedUnauthedState.current) {
-        clearAuthenticatedStores();
-        clearedUnauthedState.current =
-          true;
-      }
+    const isAuthRoute =
+      firstSegment === "register";
 
+    if (!token && !isAuthRoute) {
       if (!isIndex) {
-      router.replace("/");
+        if (!clearedUnauthedState.current) {
+          clearAuthenticatedStores();
+          clearedUnauthedState.current =
+            true;
+        }
+        router.replace("/");
       }
       return;
     }
