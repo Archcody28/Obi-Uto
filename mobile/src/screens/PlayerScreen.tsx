@@ -46,6 +46,9 @@ import {
 
 import {
   downloadVideo,
+  cancelDownload,
+  hasActiveDownload,
+  isOfflineCompatible,
 } from "../services/downloadService";
 
 import {
@@ -150,6 +153,22 @@ export default function PlayerScreen() {
         state.addDownload
     );
 
+  const updateDownload =
+    useDownloadStore(
+      (state) =>
+        state.updateDownload
+    );
+
+  const downloadEntry =
+    useDownloadStore(
+      (state) =>
+        mediaId
+          ? state.downloads.find(
+              (item) => item.id === mediaId
+            )
+          : undefined
+    );
+
   const playMedia =
     usePlayerStore(
       (state) =>
@@ -164,6 +183,13 @@ export default function PlayerScreen() {
   const [
     nextEpisode,
     setNextEpisode,
+  ] = useState<any>(
+    null
+  );
+
+  const [
+    downloadArt,
+    setDownloadArt,
   ] = useState<any>(
     null
   );
@@ -202,6 +228,29 @@ export default function PlayerScreen() {
       .catch(
         console.error
       );
+  }, [mediaId]);
+
+  /**
+   * Load artwork for the download record (thumbnail/banner).
+   */
+  useEffect(() => {
+    if (!mediaId) {
+      return;
+    }
+
+    let alive = true;
+
+    getMediaDetails(mediaId)
+      .then((data) => {
+        if (alive && data) {
+          setDownloadArt(data?.media || data);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      alive = false;
+    };
   }, [mediaId]);
 
   /**
@@ -457,9 +506,47 @@ export default function PlayerScreen() {
         }
 
         if (!onlineVideoUrl) {
+          await addDownload({
+            id: mediaId,
+            mediaId,
+            title: title || "Untitled",
+            thumbnail:
+              downloadArt?.thumbnail || null,
+            banner: downloadArt?.banner || null,
+            videoUrl: null,
+            uri: null,
+            status: "failed",
+            progress: 0,
+            error: "No playable file for this title yet",
+          });
+
           Alert.alert(
             "Error",
             "No playable file for this title yet"
+          );
+
+          return;
+        }
+
+        if (!isOfflineCompatible(onlineVideoUrl)) {
+          await addDownload({
+            id: mediaId,
+            mediaId,
+            title: title || "Untitled",
+            thumbnail:
+              downloadArt?.thumbnail || null,
+            banner: downloadArt?.banner || null,
+            videoUrl: onlineVideoUrl,
+            uri: null,
+            status: "failed",
+            progress: 0,
+            error:
+              "This title uses a streaming format that cannot be saved offline yet. An MP4 file is required.",
+          });
+
+          Alert.alert(
+            "Not downloadable",
+            "This title uses a streaming format that cannot be saved offline yet."
           );
 
           return;
@@ -470,6 +557,20 @@ export default function PlayerScreen() {
         );
 
         if (auth && auth.allowed === false) {
+          await addDownload({
+            id: mediaId,
+            mediaId,
+            title: title || "Untitled",
+            thumbnail:
+              downloadArt?.thumbnail || null,
+            banner: downloadArt?.banner || null,
+            videoUrl: onlineVideoUrl,
+            uri: null,
+            status: "failed",
+            progress: 0,
+            error: auth.message || "Download not allowed",
+          });
+
           Alert.alert(
             "Not allowed",
             auth.message || "Download not allowed"
@@ -478,43 +579,83 @@ export default function PlayerScreen() {
           return;
         }
 
+        // Active download -> refresh guard; duplicate taps are ignored.
+        if (
+          downloadEntry?.status === "downloading" ||
+          hasActiveDownload(mediaId)
+        ) {
+          return;
+        }
+
+        // Immediately show downloading state before the file work starts.
+        await addDownload({
+          id: mediaId,
+          mediaId,
+          title: title || "Untitled",
+          thumbnail:
+            downloadArt?.thumbnail || null,
+          banner: downloadArt?.banner || null,
+          videoUrl: onlineVideoUrl,
+          uri: null,
+          status: "downloading",
+          progress: 0,
+          error: null,
+        });
+
         const result =
           await downloadVideo(
             onlineVideoUrl,
             `${mediaId}.mp4`,
             (p) => {
-              console.log(
-                "Download:",
-                Math.round(
-                  p * 100
-                ) + "%"
-              );
-            }
+              updateDownload(mediaId, {
+                progress: p,
+              });
+            },
+            mediaId
           );
 
-        await addDownload({
-          id: mediaId,
-          title,
-          uri: result.uri,
+        await updateDownload(mediaId, {
+          status: "completed",
           progress: 1,
+          uri: result.uri,
+          error: null,
         });
 
         Alert.alert(
-          "Success",
-          "Download Complete"
+          "Download Complete",
+          `${title || "Video"} downloaded successfully!`
         );
       } catch (err: any) {
         console.log(
           err
         );
 
+        const message =
+          err?.response?.data?.message ||
+          err?.message ||
+          "Unable to download";
+
+        // Cancellation surfaces as a cancelled state, not a failure.
+        if (/cancel/i.test(message) && mediaId) {
+          await updateDownload(mediaId, {
+            status: "cancelled",
+            progress: 0,
+            error: null,
+          });
+
+          return;
+        }
+
+        if (mediaId) {
+          await updateDownload(mediaId, {
+            status: "failed",
+            error: message,
+          });
+        }
+
         Alert.alert(
           "Download Failed",
-          err
-            ?.response
-            ?.data
-            ?.message ||
-            "Unable to download"
+          message
         );
       }
     };
@@ -712,22 +853,54 @@ addFavorite({
         )}
 
       {!isLive && !localUri && (
-        <TouchableOpacity
-          style={
-            styles.downloadBtn
-          }
-          onPress={
-            handleDownload
-          }
-        >
-          <Text
-            style={
-              styles.downloadText
-            }
+        <View>
+          <TouchableOpacity
+            style={[
+              styles.downloadBtn,
+              downloadEntry?.status === "downloading" &&
+                styles.downloadBtnActive,
+              downloadEntry?.status === "completed" &&
+                styles.downloadBtnDone,
+            ]}
+            onPress={handleDownload}
           >
-            Download
-          </Text>
-        </TouchableOpacity>
+            <Text
+              style={
+                styles.downloadText
+              }
+            >
+              {downloadEntry?.status === "downloading"
+                ? `Downloading ${Math.round((downloadEntry?.progress || 0) * 100)}% — Tap to Cancel`
+                : downloadEntry?.status === "completed"
+                  ? "Downloaded — View Downloads"
+                  : downloadEntry?.status === "failed"
+                    ? "Retry Download"
+                    : downloadEntry?.status === "cancelled"
+                      ? "Download Cancelled — Retry"
+                      : "Download"}
+            </Text>
+          </TouchableOpacity>
+
+          {downloadEntry?.status === "downloading" && (
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${Math.round((downloadEntry?.progress || 0) * 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+          )}
+
+          {!!downloadEntry?.error &&
+            downloadEntry?.status === "failed" && (
+              <Text style={styles.downloadError}>
+                {downloadEntry.error}
+              </Text>
+            )}
+        </View>
       )}
 
       <TouchableOpacity
@@ -810,6 +983,36 @@ const styles =
       marginTop: AppTheme.spacing.md,
       marginHorizontal: AppTheme.spacing.lg,
       borderRadius: AppTheme.radius.md,
+    },
+
+    downloadBtnActive: {
+      backgroundColor: AppTheme.colors.accentMuted,
+    },
+
+    downloadBtnDone: {
+      backgroundColor: AppTheme.colors.success,
+    },
+
+    progressTrack: {
+      height: 6,
+      marginTop: AppTheme.spacing.sm,
+      marginHorizontal: AppTheme.spacing.lg,
+      borderRadius: 3,
+      backgroundColor: "rgba(248,244,234,0.18)",
+      overflow: "hidden",
+    },
+
+    progressFill: {
+      height: "100%",
+      backgroundColor: AppTheme.colors.accent,
+    },
+
+    downloadError: {
+      color: AppTheme.colors.danger,
+      marginTop: AppTheme.spacing.sm,
+      marginHorizontal: AppTheme.spacing.lg,
+      fontSize: AppTheme.typography.caption.fontSize,
+      lineHeight: 16,
     },
 
     favoriteBtn: {
