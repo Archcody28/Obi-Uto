@@ -188,6 +188,13 @@ export default function ProfileScreen() {
             router.push("/favorites")
           }
         />
+        <Action
+          title="Notifications"
+          subtitle="Alerts, uploads, and donations"
+          onPress={() =>
+            router.push("/notifications" as any)
+          }
+        />
       </View>
 
       <View style={styles.section}>
@@ -206,6 +213,13 @@ export default function ProfileScreen() {
           subtitle="Buy coins securely"
           onPress={() =>
             router.push("/coin-store")
+          }
+        />
+        <Action
+          title="Subscription Plans"
+          subtitle="Membership and billing"
+          onPress={() =>
+            router.push("/subscription")
           }
         />
       </View>

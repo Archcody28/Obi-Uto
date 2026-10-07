@@ -14,12 +14,15 @@ import Constants from "expo-constants";
 
 import {
   Platform,
-  Alert,
 } from "react-native";
 
 import {
   registerForPushNotifications,
 } from "../services/notificationService";
+
+import {
+  openNotificationTarget,
+} from "../utils/notificationNavigation";
 
 // expo-notifications is unsupported in Expo Go (SDK 53+) and its module graph
 // can throw during eager route loading. Import it on demand only for
@@ -196,117 +199,16 @@ useEffect(() => {
       subscription =
         Notifications.addNotificationResponseReceivedListener(
           (response) => {
-const data =
-  response.notification.request.content.data as {
-    type?: string;
-    streamId?: string;
-    mediaId?: string;
-    creatorId?: string;
-  };
+            const data =
+              response.notification.request.content.data as {
+                type?: string;
+                streamId?: string;
+                mediaId?: string;
+                creatorId?: string;
+              };
 
-if (!data?.type) {
-  return;
-}
-        switch (data.type) {
-          case "live":
-            if (data.streamId) {
-              router.push({
-                pathname: "/player" as any,
-                params: {
-                  mediaId:
-                    data.streamId,
-                  streamId:
-                    data.streamId,
-                  isLive: "true",
-                },
-              });
-            } else {
-              router.push("/live" as any);
-            }
-            break;
-
-          case "upload":
-            if (!data.mediaId) {
-              Alert.alert(
-                "Upload",
-                "This notification is missing a title destination."
-              );
-              break;
-            }
-
-            router.push({
-              pathname: "/details" as any,
-              params: {
-                id: data.mediaId,
-              },
-            });
-            break;
-
-          case "donation":
-            router.push(
-              "/wallet" as any
-            );
-            break;
-
-          case "subscription":
-            Alert.alert(
-              "Subscription",
-              "Subscription management is not available in this app yet."
-            );
-            break;
-
-          case "payment":
-            router.push(
-              "/wallet" as any
-            );
-            break;
-
-          case "download":
-            router.push(
-              "/(tabs)/downloads" as any
-            );
-            break;
-
-          case "follow":
-            if (data.creatorId) {
-              router.push({
-                pathname:
-                  "/creator-profile" as any,
-                params: {
-                  creatorId:
-                    data.creatorId,
-                },
-              });
-            } else {
-              Alert.alert(
-                "Follow",
-                "This notification is missing a creator destination."
-              );
-            }
-            break;
-
-          case "comment":
-            if (!data.mediaId) {
-              Alert.alert(
-                "Comment",
-                "This notification is missing a title destination."
-              );
-              break;
-            }
-
-            router.push({
-              pathname: "/details" as any,
-              params: {
-                id: data.mediaId,
-              },
-            });
-            break;
-
-          case "system":
-          default:
-            break;
-        }
-            }
+            openNotificationTarget(data);
+          }
     );
     } catch (err) {
       console.error(
