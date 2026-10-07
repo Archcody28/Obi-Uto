@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   router,
@@ -25,6 +26,7 @@ import {
 import { AppTheme } from "../constants/theme";
 
 export default function ProfileScreen() {
+  const insets = useSafeAreaInsets();
   const user =
     useAuthStore(
       (state) => state.user
@@ -84,9 +86,13 @@ export default function ProfileScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={
-        styles.content
-      }
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: AppTheme.spacing.lg + insets.top,
+          paddingBottom: 96 + insets.bottom,
+        },
+      ]}
     >
       <Text style={styles.kicker}>
         Account

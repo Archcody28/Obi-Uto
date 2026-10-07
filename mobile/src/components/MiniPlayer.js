@@ -81,7 +81,7 @@ export default function MiniPlayer() {
     <Text
       style={styles.icon}
     >
-      ⏮
+      {"|◀"}
     </Text>
   </TouchableOpacity>
 
@@ -91,7 +91,7 @@ export default function MiniPlayer() {
     <Text
       style={styles.icon}
     >
-      ⏭
+      {"▶|"}
     </Text>
   </TouchableOpacity>
 </View>
@@ -107,7 +107,7 @@ const styles =
 
       left: 0,
       right: 0,
-      bottom: 0,
+      bottom: 72,
 
       backgroundColor:
         "#1A1A1A",
@@ -127,12 +127,16 @@ const styles =
 
       borderTopColor:
         "#333",
+
+      borderRadius: 12,
+      marginHorizontal: 12,
     },
 
     title: {
       color: "#FFF",
       fontWeight: "700",
-      maxWidth: 250,
+      flex: 1,
+      marginRight: 12,
     },
 
     subtitle: {

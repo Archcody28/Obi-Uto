@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   },
 
   banner: {
-    minHeight: 340,
+    minHeight: 280,
     justifyContent: "flex-end",
     backgroundColor:
       AppTheme.colors.surface,
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   overlay: {
     padding: AppTheme.spacing.xl,
     paddingBottom: AppTheme.spacing.xl,
-    paddingTop: 70,
+    paddingTop: 48,
   },
 
   kicker: {

@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   searchMedia,
@@ -18,6 +19,7 @@ import MediaCard from "../components/MediaCard";
 import { AppTheme } from "../constants/theme";
 
 export default function SearchScreen() {
+  const insets = useSafeAreaInsets();
   const [query, setQuery] =
     useState("");
   const [results, setResults] =
@@ -64,7 +66,15 @@ export default function SearchScreen() {
     };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: AppTheme.spacing.lg + insets.top,
+          paddingBottom: insets.bottom,
+        },
+      ]}
+    >
       <Text style={styles.kicker}>
         Discover
       </Text>
@@ -189,6 +199,7 @@ const styles =
     },
 
     results: {
+      flexGrow: 1,
       paddingBottom: 96,
     },
 

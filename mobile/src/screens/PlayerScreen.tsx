@@ -9,7 +9,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  ScrollView,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   router,
@@ -64,6 +66,7 @@ import LiveChatScreen from "./LivechatScreen";
 import { AppTheme } from "../constants/theme";
 
 export default function PlayerScreen() {
+  const insets = useSafeAreaInsets();
   const params =
     useLocalSearchParams();
 
@@ -453,9 +456,27 @@ export default function PlayerScreen() {
           return;
         }
 
-        await authorizeDownload(
+        if (!onlineVideoUrl) {
+          Alert.alert(
+            "Error",
+            "No playable file for this title yet"
+          );
+
+          return;
+        }
+
+        const auth = await authorizeDownload(
           mediaId
         );
+
+        if (auth && auth.allowed === false) {
+          Alert.alert(
+            "Not allowed",
+            auth.message || "Download not allowed"
+          );
+
+          return;
+        }
 
         const result =
           await downloadVideo(
@@ -592,12 +613,17 @@ addFavorite({
   }
 
   return (
-    <View
-      style={
-        styles.container
-      }
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top,
+          paddingBottom: 96 + insets.bottom,
+        },
+      ]}
     >
-      <VideoView
+    <VideoView
         style={
           isLive
             ? styles.liveVideo
@@ -735,11 +761,11 @@ addFavorite({
             styles.downloadText
           }
         >
-          ❤️ Favorite
+          ❤ Favorite
         </Text>
       </TouchableOpacity>
       )}
-    </View>
+    </ScrollView>
   );
 }
 const styles =
@@ -749,8 +775,15 @@ const styles =
       backgroundColor: AppTheme.colors.background,
     },
 
+    content: {
+      flexGrow: 1,
+      paddingBottom: 96,
+    },
+
     video: {
-      flex: 1,
+      aspectRatio: 16 / 9,
+      minHeight: 220,
+      backgroundColor: "#000000",
     },
 
     liveVideo: {

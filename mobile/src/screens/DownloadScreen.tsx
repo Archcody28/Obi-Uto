@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   router,
@@ -20,10 +21,11 @@ import {
 } from "../store/downloadStore";
 
 import * as FileSystem
-  from "expo-file-system";
+  from "expo-file-system/legacy";
 import { AppTheme } from "../constants/theme";
 
 export default function DownloadScreen() {
+  const insets = useSafeAreaInsets();
   const downloads =
     useDownloadStore(
       (state) =>
@@ -106,7 +108,15 @@ export default function DownloadScreen() {
     };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: AppTheme.spacing.lg + insets.top,
+          paddingBottom: insets.bottom,
+        },
+      ]}
+    >
       <Text style={styles.kicker}>
         Library
       </Text>

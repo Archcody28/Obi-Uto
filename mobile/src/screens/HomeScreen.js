@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { router } from "expo-router";
 
@@ -59,6 +60,7 @@ const ratings = [
 ];
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const activeProfile =
     useProfileStore(
       (state) =>
@@ -284,9 +286,13 @@ export default function HomeScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={
-        styles.content
-      }
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: AppTheme.spacing.lg + insets.top,
+          paddingBottom: 96 + insets.bottom,
+        },
+      ]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -501,6 +507,7 @@ const styles =
       justifyContent:
         "space-between",
       alignItems: "center",
+      gap: AppTheme.spacing.md,
       paddingHorizontal: AppTheme.spacing.lg,
       marginBottom: AppTheme.spacing.sm,
     },
@@ -617,6 +624,8 @@ const styles =
 
     scheduledCard: {
       width: 200,
+      maxWidth: "72%",
+      flexShrink: 1,
       marginRight: AppTheme.spacing.md,
       padding: AppTheme.spacing.lg,
       borderRadius: AppTheme.radius.lg,

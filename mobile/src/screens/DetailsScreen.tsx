@@ -45,9 +45,11 @@ import {
 import {
   useProfileStore,
 } from "../store/profileStore";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppTheme } from "../constants/theme";
 
 export default function DetailsScreen() {
+  const insets = useSafeAreaInsets();
   const params =
     useLocalSearchParams();
 
@@ -317,9 +319,13 @@ export default function DetailsScreen() {
   return (
     <FlatList
       style={styles.container}
-      contentContainerStyle={
-        styles.content
-      }
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingTop: insets.top,
+          paddingBottom: 90 + insets.bottom,
+        },
+      ]}
       data={comments}
       keyExtractor={(item, index) =>
         item._id ||
@@ -537,7 +543,7 @@ const styles =
 
     heroShade: {
       padding: AppTheme.spacing.xl,
-      paddingTop: 120,
+      paddingTop: 72,
       backgroundColor:
         "rgba(7,8,10,0.62)",
     },

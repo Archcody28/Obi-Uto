@@ -24,8 +24,10 @@ import {
   removeFavorite as removeFavoriteApi,
 } from "../api/favoriteApi";
 import { AppTheme } from "../constants/theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function FavoritesScreen() {
+  const insets = useSafeAreaInsets();
   const storeFavorites =
     useFavoritesStore(
       (state) =>
@@ -101,7 +103,15 @@ export default function FavoritesScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: AppTheme.spacing.lg + insets.top,
+          paddingBottom: insets.bottom,
+        },
+      ]}
+    >
       <Text style={styles.kicker}>
         Library
       </Text>
