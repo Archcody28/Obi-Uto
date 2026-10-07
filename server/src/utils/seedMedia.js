@@ -24,7 +24,7 @@ async function seed() {
         thumbnail:
           "https://picsum.photos/300/400",
         videoUrl:
-          "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+          "https://download.samplelib.com/mp4/sample-5s.mp4",
       },
 
       {

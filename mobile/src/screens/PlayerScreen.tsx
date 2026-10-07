@@ -201,8 +201,9 @@ export default function PlayerScreen() {
 
   const player =
     useVideoPlayer(
-      videoSource || "",
+      videoSource || null,
       (player) => {
+        player.loop = false;
         player.play();
       }
     );
@@ -279,10 +280,16 @@ export default function PlayerScreen() {
    */
   useEffect(() => {
     if (
-      progress > 0
+      progress > 0 &&
+      Number.isFinite(progress) &&
+      player?.duration
     ) {
-      player.currentTime =
-        progress;
+      try {
+        player.currentTime =
+          Math.min(progress, player.duration);
+      } catch (err) {
+        console.log("Seek error:", err);
+      }
     }
   }, [
     progress,
@@ -293,6 +300,22 @@ export default function PlayerScreen() {
    * Save progress periodically
    */
   useEffect(() => {
+    const readTime = () => {
+      try {
+        const t = player?.currentTime;
+        const d = player?.duration || 0;
+
+        return {
+          currentTime:
+            Number.isFinite(t) ? t : 0,
+          duration:
+            Number.isFinite(d) ? d : 0,
+        };
+      } catch (err) {
+        return { currentTime: 0, duration: 0 };
+      }
+    };
+
     const interval =
       setInterval(() => {
         if (
@@ -301,13 +324,16 @@ export default function PlayerScreen() {
           return;
         }
 
+        const { currentTime, duration } = readTime();
+
+        if (currentTime <= 0) {
+          return;
+        }
+
         saveProgressApi({
           mediaId,
-          currentTime:
-            player.currentTime,
-          duration:
-            player.duration ||
-            0,
+          currentTime,
+          duration,
         }).catch(
           console.error
         );
@@ -324,13 +350,16 @@ export default function PlayerScreen() {
         return;
       }
 
+      const { currentTime, duration } = readTime();
+
+      if (currentTime <= 0) {
+        return;
+      }
+
       saveProgressApi({
         mediaId,
-        currentTime:
-          player.currentTime,
-        duration:
-          player.duration ||
-          0,
+        currentTime,
+        duration,
       }).catch(
         console.error
       );
@@ -771,6 +800,8 @@ addFavorite({
             : styles.video
         }
         player={player}
+        nativeControls
+        contentFit="contain"
       />
 
       {isLive && streamId && (
