@@ -7,12 +7,12 @@ const isDev = process.env.NODE_ENV !== "production";
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   (isDev
-    ? "http://192.168.42.43:5000/api"
+    ? "http://192.168.43.184:5000/api"
     : "https://api.obi-uto.com/api");
 
 // Socket.IO URL - uses environment variable or falls back to development default
 export const SOCKET_URL =
   process.env.EXPO_PUBLIC_SOCKET_URL ||
   (isDev
-    ? "http://192.168.42.43:5000"
+    ? "http://192.168.43.184:5000"
     : "https://api.obi-uto.com");

@@ -17,7 +17,6 @@ import {
 
 import {
   registerUser,
-  loginUser,
 } from "../api/authApi";
 
 import {
@@ -57,18 +56,14 @@ export default function RegisterScreen() {
       try {
         setLoading(true);
 
-        // Registration does not return a token; log in to establish a session.
-        await registerUser(
+        // Register returns token + user; establish the session directly with
+        // a single request so the strict auth rate limiter (10/15min) is not
+        // consumed twice on the physical device.
+        const response = await registerUser(
           name,
           email,
           password
         );
-
-        const response =
-          await loginUser(
-            email,
-            password
-          );
 
         setToken(
           response.token
