@@ -75,18 +75,27 @@ export default function FavoritesScreen() {
     loadFavorites();
   }, []);
 
+  const list: any[] = Array.isArray(apiFavorites)
+    ? apiFavorites
+    : (apiFavorites as any)?.favorites ||
+      (apiFavorites as any)?.data ||
+      [];
+
   const serverItems =
-    apiFavorites
-      .map((item) => item.media)
+    list
+      .map((item) => item.media || item)
       .filter(Boolean);
 
   const combined = [
     ...serverItems.map((item) => ({
       ...item,
       favoriteSource: "server",
-      mediaId: item._id,
+      mediaId: item._id || item.id,
     })),
-    ...storeFavorites.map((item) => ({
+    ...(Array.isArray(storeFavorites)
+      ? storeFavorites
+      : []
+    ).map((item) => ({
       ...item,
       favoriteSource: "local",
       mediaId:

@@ -72,8 +72,8 @@ export default function CoinCheckoutScreen() {
         console.log(err);
 
         Alert.alert(
-          "Error",
-          "Failed to start checkout"
+          "Checkout unavailable",
+          "Coin checkout is not configured right now. Please try again later."
         );
 
         router.back();

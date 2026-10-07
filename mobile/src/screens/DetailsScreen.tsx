@@ -33,7 +33,8 @@ import {
   addComment,
 } from "../api/engagementApi";
 import {
-  addFavorite as addFavoriteApi,
+  getFavorites,
+  removeFavorite as removeFavoriteApi,
 } from "../api/favoriteApi";
 import MediaRow from "../components/MediaRow";
 import {
@@ -83,6 +84,10 @@ export default function DetailsScreen() {
     setLiked,
   ] = useState(false);
   const [
+    favoriteBusy,
+    setFavoriteBusy,
+  ] = useState(false);
+  const [
     loading,
     setLoading,
   ] = useState(true);
@@ -96,10 +101,15 @@ export default function DetailsScreen() {
       (state) =>
         state.setQueue
     );
-  const addFavorite =
+  const storeAddFavorite =
     useFavoritesStore(
       (state) =>
         state.addFavorite
+    );
+  const removeFavorite =
+    useFavoritesStore(
+      (state) =>
+        state.removeFavorite
     );
 
   const loadMedia =
@@ -120,6 +130,26 @@ export default function DetailsScreen() {
           await getMediaDetails(id);
 
         setMedia(data);
+
+        // Sync the Favorite button with the server: Details previously
+        // always showed "Favorite" even for saved titles, and tapping it
+        // re-posted without ever offering Remove.
+        try {
+          const favorites = await getFavorites();
+          const list = Array.isArray(favorites)
+            ? favorites
+            : favorites?.favorites || favorites?.data || [];
+
+          setLiked(
+            list.some(
+              (entry: any) =>
+                (entry?.media?._id || entry?.media || entry?._id) ===
+                (data?._id || id)
+            )
+          );
+        } catch (favErr) {
+          console.log(favErr);
+        }
 
         if (
           data.type === "series"
@@ -197,20 +227,22 @@ export default function DetailsScreen() {
 
   const handleFavorite =
     async () => {
+      // Legacy quick-save kept for compatibility: local store + server.
+      // The Like button above is the honest toggle with Remove support.
       try {
         const profile =
           useProfileStore
             .getState()
             .activeProfile;
 
-        addFavorite({
+        storeAddFavorite({
           id: media._id,
           title: media.title,
           profileId:
             profile?.id,
         });
 
-        await addFavoriteApi(
+        await toggleLike(
           media._id
         );
 
@@ -229,17 +261,35 @@ export default function DetailsScreen() {
 
   const handleLike =
     async () => {
+      // Favorite toggle with honest server state: add on first tap,
+      // remove on second tap, and roll back the UI on failure.
+      if (favoriteBusy || !media?._id) {
+        return;
+      }
+
+      const previous = liked;
+
+      setFavoriteBusy(true);
+      setLiked(!previous);
+
       try {
-        const result =
+        if (previous) {
+          await removeFavoriteApi(media._id);
+
+          removeFavorite(media._id);
+        } else {
           await toggleLike(
             media._id
           );
 
-        setLiked(
-          result.liked
-        );
+          storeAddFavorite(media);
+        }
       } catch (err) {
         console.log(err);
+
+        setLiked(previous);
+      } finally {
+        setFavoriteBusy(false);
       }
     };
 
@@ -414,11 +464,14 @@ export default function DetailsScreen() {
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={handleLike}
+                disabled={favoriteBusy}
               >
                 <Text style={styles.secondaryText}>
-                  {liked
-                    ? "Liked"
-                    : "Like"}
+                  {favoriteBusy
+                    ? "Saving..."
+                    : liked
+                      ? "★ Favorited — Remove"
+                      : "☆ Favorite"}
                 </Text>
               </TouchableOpacity>
             </View>

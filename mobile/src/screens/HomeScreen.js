@@ -221,7 +221,10 @@ export default function HomeScreen() {
     );
 
   const continueMedia =
-    continueItems
+    (Array.isArray(continueItems)
+      ? continueItems
+      : []
+    )
       .map((item) =>
         item.media || item
       )

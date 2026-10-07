@@ -23,9 +23,41 @@ export default function CoinWalletScreen() {
   } =
     useCoinWalletStore();
 
+  const [loading, setLoading] =
+    React.useState(true);
+  const [error, setError] =
+    React.useState("");
+
   useEffect(() => {
-    loadWallet();
-    loadHistory();
+    let alive = true;
+
+    (async () => {
+      setLoading(true);
+      setError("");
+
+      try {
+        await Promise.all([
+          loadWallet(),
+          loadHistory(),
+        ]);
+      } catch (err) {
+        console.log(err);
+
+        if (alive) {
+          setError(
+            "We could not load your wallet. Pull to retry."
+          );
+        }
+      } finally {
+        if (alive) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
   }, []);
 
   return (
@@ -42,18 +74,26 @@ export default function CoinWalletScreen() {
           Available coins
         </Text>
         <Text style={styles.balance}>
-          {wallet.coins}
+          {loading
+            ? "…"
+            : (wallet?.coins ?? 0)}
         </Text>
       </View>
+
+      {!!error && (
+        <Text style={styles.error}>
+          {error}
+        </Text>
+      )}
 
       <View style={styles.summaryRow}>
         <Summary
           label="Purchased"
-          value={wallet.totalPurchased}
+          value={loading ? 0 : (wallet?.totalPurchased ?? 0)}
         />
         <Summary
           label="Spent"
-          value={wallet.totalSpent}
+          value={loading ? 0 : (wallet?.totalSpent ?? 0)}
         />
       </View>
 
@@ -220,5 +260,11 @@ const styles = StyleSheet.create({
     color: AppTheme.colors.textMuted,
     textAlign: "center",
     marginTop: 34,
+  },
+
+  error: {
+    color: AppTheme.colors.danger,
+    fontWeight: "800",
+    marginBottom: 12,
   },
 });
