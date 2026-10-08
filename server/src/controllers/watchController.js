@@ -19,6 +19,17 @@ exports.saveProgress =
       duration,
     } = req.body;
 
+    if (!mediaId) {
+      return res.status(400).json({
+        message: "mediaId is required",
+      });
+    }
+
+    const safeCurrent = Number(currentTime) || 0;
+    const safeDuration = Number(duration) || 0;
+    const completed =
+      safeDuration > 0 && safeCurrent >= safeDuration * 0.95;
+
     const watch =
       await WatchSession.findOneAndUpdate(
         {
@@ -28,8 +39,9 @@ exports.saveProgress =
           mediaId,
         },
         {
-          currentTime,
-          duration,
+          currentTime: safeCurrent,
+          duration: safeDuration,
+          completed,
         },
         {
           upsert: true,
@@ -91,18 +103,27 @@ exports.getProgress =
     const items =
       await WatchSession
         .find({
-          userId:
-            req.user.id,
+          userId: req.user.id,
+          $or: [{ completed: false }, { completed: { $exists: false } }],
         })
         .sort({
           updatedAt: -1,
         })
         .limit(20)
-        .populate(
-          "mediaId"
-        );
+        .populate("mediaId");
 
-    res.json(items);
+    // Drop entries whose media was deleted and cap duplicates per title.
+    const seen = new Set();
+    const clean = items.filter((entry) => {
+      const media = entry.mediaId && entry.mediaId._id ? entry.mediaId : null;
+      if (!media) return false;
+      const key = String(media._id);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    res.json(clean);
   };
 
   exports.authorizeDownload =

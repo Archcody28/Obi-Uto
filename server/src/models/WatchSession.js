@@ -12,6 +12,7 @@ const schema =
       mediaId: {
         type:
           mongoose.Schema.Types.ObjectId,
+        ref: "Media",
       },
 
       currentTime: Number,

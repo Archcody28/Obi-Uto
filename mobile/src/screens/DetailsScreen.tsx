@@ -225,73 +225,28 @@ export default function DetailsScreen() {
     });
   };
 
-  const handleFavorite =
-    async () => {
-      // Legacy quick-save kept for compatibility: local store + server.
-      // The Like button above is the honest toggle with Remove support.
-      try {
-        const profile =
-          useProfileStore
-            .getState()
-            .activeProfile;
-
-        storeAddFavorite({
-          id: media._id,
-          title: media.title,
-          profileId:
-            profile?.id,
-        });
-
-        await toggleLike(
-          media._id
-        );
-
-        Alert.alert(
-          "Saved",
-          "Added to Favorites"
-        );
-      } catch (err) {
-        console.log(err);
-        Alert.alert(
-          "Favorite failed",
-          "Please try again."
-        );
+  const handleFavorite = async () => {
+    if (favoriteBusy || !media?._id) return;
+    const previous = liked;
+    setFavoriteBusy(true);
+    setLiked(!previous);
+    try {
+      const profile = useProfileStore.getState().activeProfile;
+      if (previous) {
+        await removeFavoriteApi(media._id);
+        removeFavorite(media._id);
+      } else {
+        await toggleLike(media._id);
+        storeAddFavorite({ id: media._id, title: media.title, profileId: profile?.id });
       }
-    };
-
-  const handleLike =
-    async () => {
-      // Favorite toggle with honest server state: add on first tap,
-      // remove on second tap, and roll back the UI on failure.
-      if (favoriteBusy || !media?._id) {
-        return;
-      }
-
-      const previous = liked;
-
-      setFavoriteBusy(true);
-      setLiked(!previous);
-
-      try {
-        if (previous) {
-          await removeFavoriteApi(media._id);
-
-          removeFavorite(media._id);
-        } else {
-          await toggleLike(
-            media._id
-          );
-
-          storeAddFavorite(media);
-        }
-      } catch (err) {
-        console.log(err);
-
-        setLiked(previous);
-      } finally {
-        setFavoriteBusy(false);
-      }
-    };
+    } catch (err) {
+      console.log(err);
+      setLiked(previous);
+      Alert.alert("Favorite failed", "Please try again.");
+    } finally {
+      setFavoriteBusy(false);
+    }
+  };
 
   const handleComment =
     async () => {
@@ -302,19 +257,17 @@ export default function DetailsScreen() {
           return;
         }
 
-        await addComment(
-          media._id,
-          commentText.trim()
-        );
-
+        const text = commentText.trim();
         setCommentText("");
-
-        const updated =
-          await getComments(
-            media._id
-          );
-
-        setComments(updated);
+        let posted = null;
+        try {
+          posted = await addComment(media._id, text);
+        } catch (postErr) {
+          setCommentText(text);
+          throw postErr;
+        }
+        const fresh = await getComments(media._id);
+        setComments(fresh || (posted ? [posted] : []));
       } catch (err) {
         console.log(err);
         Alert.alert(
@@ -455,15 +408,6 @@ export default function DetailsScreen() {
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={handleFavorite}
-              >
-                <Text style={styles.secondaryText}>
-                  Favorite
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={handleLike}
                 disabled={favoriteBusy}
               >
                 <Text style={styles.secondaryText}>

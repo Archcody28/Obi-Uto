@@ -1,5 +1,6 @@
 import React, {
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -175,10 +176,14 @@ export default function PlayerScreen() {
         state.playMedia
     );
 
-  const [
-    progress,
-    setProgress,
-  ] = useState(0);
+  const [progress, setProgress] =
+    useState(0);
+
+  /** Live values read safely outside the expo-video player instance. */
+  const progressRef = useRef(0);
+  const durationRef = useRef(0);
+  const mountedRef = useRef(true);
+  const lastSavedRef = useRef(0);
 
   const [
     nextEpisode,
@@ -209,6 +214,17 @@ export default function PlayerScreen() {
     );
 
   /**
+   * Track mount state so async callbacks never touch a released player.
+   */
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  /**
    * Load saved progress
    */
   useEffect(() => {
@@ -216,19 +232,23 @@ export default function PlayerScreen() {
       return;
     }
 
+    let alive = true;
+
     getProgress(mediaId)
       .then((data) => {
-        if (
-          data?.currentTime
-        ) {
-          setProgress(
-            data.currentTime
-          );
+        if (!alive || !mountedRef.current) {
+          return;
+        }
+
+        if (data?.currentTime) {
+          setProgress(data.currentTime);
         }
       })
-      .catch(
-        console.error
-      );
+      .catch(console.error);
+
+    return () => {
+      alive = false;
+    };
   }, [mediaId]);
 
   /**
@@ -276,98 +296,121 @@ export default function PlayerScreen() {
   ]);
 
   /**
-   * Resume playback
+   * Resume playback (seek once per title, never touch a released player).
    */
+  const didSeekRef = useRef<string | null>(null);
   useEffect(() => {
     if (
-      progress > 0 &&
-      Number.isFinite(progress) &&
-      player?.duration
+      !mediaId ||
+      isLive ||
+      !(progress > 0) ||
+      !Number.isFinite(progress) ||
+      didSeekRef.current === mediaId
     ) {
-      try {
-        player.currentTime =
-          Math.min(progress, player.duration);
-      } catch (err) {
-        console.log("Seek error:", err);
-      }
+      return;
     }
-  }, [
-    progress,
-    player,
-  ]);
+
+    let duration = 0;
+    try {
+      duration = player?.duration || 0;
+    } catch {
+      return;
+    }
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
+
+    if (progress >= duration - 2) {
+      didSeekRef.current = mediaId;
+      return;
+    }
+
+    try {
+      player.currentTime = Math.min(progress, duration);
+      didSeekRef.current = mediaId;
+    } catch (err) {
+      console.log("Seek error:", err);
+    }
+  }, [progress, player, mediaId, isLive]);
+
+  useEffect(() => {
+    didSeekRef.current = null;
+    progressRef.current = 0;
+    durationRef.current = 0;
+    lastSavedRef.current = 0;
+  }, [mediaId]);
 
   /**
-   * Save progress periodically
+   * Save progress periodically (throttled, completion-aware).
    */
   useEffect(() => {
     const readTime = () => {
+      if (!mountedRef.current || !player) {
+        return { currentTime: 0, duration: 0 };
+      }
       try {
-        const t = player?.currentTime;
-        const d = player?.duration || 0;
+        const t = player.currentTime;
+        const d = player.duration || 0;
 
         return {
-          currentTime:
-            Number.isFinite(t) ? t : 0,
-          duration:
-            Number.isFinite(d) ? d : 0,
+          currentTime: Number.isFinite(t) ? t : 0,
+          duration: Number.isFinite(d) ? d : 0,
         };
-      } catch (err) {
+      } catch {
         return { currentTime: 0, duration: 0 };
       }
     };
 
-    const interval =
-      setInterval(() => {
-        if (
-          !mediaId
-        ) {
-          return;
-        }
+    const shouldSave = (currentTime: number, duration: number) => {
+      if (!mediaId || isLive || currentTime <= 0) {
+        return false;
+      }
+      // Completed (>=95%): save once, then stop spamming.
+      if (duration > 0 && currentTime >= duration * 0.95) {
+        return lastSavedRef.current < duration * 0.95;
+      }
+      return Math.abs(currentTime - lastSavedRef.current) >= 5;
+    };
 
-        const { currentTime, duration } = readTime();
+    const persist = (currentTime: number, duration: number) => {
+      lastSavedRef.current = currentTime;
+      progressRef.current = currentTime;
+      durationRef.current = duration;
+      saveLocalProgress({
+        id: mediaId,
+        title,
+        progress: currentTime,
+      });
+      saveProgressApi({ mediaId, currentTime, duration }).catch(console.error);
+    };
 
-        if (currentTime <= 0) {
-          return;
-        }
+    const interval = setInterval(() => {
+      const { currentTime, duration } = readTime();
 
-        saveProgressApi({
-          mediaId,
-          currentTime,
-          duration,
-        }).catch(
-          console.error
-        );
-      }, 10000);
+      if (!shouldSave(currentTime, duration)) {
+        return;
+      }
+
+      persist(currentTime, duration);
+    }, 10000);
 
     return () => {
-      clearInterval(
-        interval
-      );
+      clearInterval(interval);
 
-      if (
-        !mediaId
-      ) {
+      if (!mountedRef.current) {
         return;
       }
 
       const { currentTime, duration } = readTime();
 
-      if (currentTime <= 0) {
+      if (!shouldSave(currentTime, duration)) {
         return;
       }
 
-      saveProgressApi({
-        mediaId,
-        currentTime,
-        duration,
-      }).catch(
-        console.error
-      );
+      persist(currentTime, duration);
     };
-  }, [
-    mediaId,
-    player,
-  ]);
+  }, [mediaId, player, isLive, title, saveLocalProgress]);
 
   /**
    * Load next episode
@@ -434,24 +477,30 @@ export default function PlayerScreen() {
   }, [mediaId]);
 
   /**
-   * Auto-play next episode
+   * Auto-play next episode (never touches a released player).
    */
   useEffect(() => {
-    if (
-      !nextEpisode
-    ) {
+    if (!nextEpisode) {
       return;
     }
 
-    const interval =
-      setInterval(() => {
-        const duration =
-          player.duration ||
-          0;
+    const interval = setInterval(() => {
+      if (!mountedRef.current) {
+        return;
+      }
 
-        const currentTime =
-          player.currentTime ||
-          0;
+      let duration = 0;
+      let currentTime = 0;
+      try {
+        duration = player?.duration || 0;
+        currentTime = player?.currentTime || 0;
+      } catch {
+        return;
+      }
+
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return;
+      }
 
         const remaining =
           duration -
@@ -689,80 +738,74 @@ export default function PlayerScreen() {
       }
     };
 
-  const handleSave =
-    async () => {
+  const handleSave = async () => {
+    try {
+      if (!mediaId) {
+        Alert.alert("Error", "Media ID missing");
+        return;
+      }
+
+      let currentTime = progressRef.current || 0;
+      let duration = durationRef.current || 0;
       try {
-        saveLocalProgress({
-          id: mediaId,
-          title,
-          progress:
-            player.currentTime,
-        });
-
-        const payload = {
-          mediaId,
-          currentTime:
-            player.currentTime,
-          duration:
-            player.duration ||
-            0,
-        };
-
-      try{
-        await saveProgressApi(
-          payload
-        );} catch {
-          useSyncStore
-          .getState()
-          .addTask({
-            id:
-             Date.now()
-             .toString(),
-             type: "save-progress",
-             payload,
-          });
+        if (mountedRef.current && player) {
+          const t = player.currentTime;
+          const d = player.duration || 0;
+          if (Number.isFinite(t) && t > 0) currentTime = t;
+          if (Number.isFinite(d) && d > 0) duration = d;
         }
-
-        Alert.alert(
-          "Success",
-          "Progress Saved"
-        );
-      } catch (err) {
-        console.log(
-          err
-        );
+      } catch {
+        // Keep last known ref values when the native player is released.
       }
-    };
 
-  const handleFavorite =
-    async () => {
+      if (!(currentTime > 0)) {
+        Alert.alert("Nothing to save", "Start playback first.");
+        return;
+      }
+
+      lastSavedRef.current = currentTime;
+      saveLocalProgress({ id: mediaId, title, progress: currentTime });
+
+      const payload = { mediaId, currentTime, duration };
+
       try {
-        const profile =
-  useProfileStore
-    .getState()
-    .activeProfile;
-
-addFavorite({
-  id: mediaId,
-  title,
-  profileId:
-    profile?.id,
-});
-
-        await addFavoriteApi(
-          mediaId
-        );
-
-        Alert.alert(
-          "Success",
-          "Saved To Favorites"
-        );
-      } catch (err) {
-        console.log(
-          err
-        );
+        await saveProgressApi(payload);
+      } catch {
+        useSyncStore.getState().addTask({
+          id: Date.now().toString(),
+          type: "save-progress",
+          payload,
+        });
       }
-    };
+
+      Alert.alert("Success", "Progress Saved");
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  const handleFavorite = async () => {
+    try {
+      if (!mediaId) {
+        Alert.alert("Error", "Media ID missing");
+        return;
+      }
+
+      const profile = useProfileStore.getState().activeProfile;
+
+      await addFavoriteApi(mediaId);
+
+      addFavorite({ id: mediaId, title, profileId: profile?.id });
+
+      Alert.alert("Success", "Saved To Favorites");
+    } catch (err: any) {
+      console.log(err);
+      Alert.alert(
+        "Favorite failed",
+        err?.response?.data?.message || "Please try again."
+      );
+    }
+  };
 
   if (!videoSource) {
     return (

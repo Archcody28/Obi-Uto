@@ -220,15 +220,26 @@ export default function HomeScreen() {
       ]
     );
 
-  const continueMedia =
-    (Array.isArray(continueItems)
-      ? continueItems
-      : []
-    )
-      .map((item) =>
-        item.media || item
-      )
-      .filter(Boolean);
+  const continueMedia = (() => {
+    const raw = Array.isArray(continueItems) ? continueItems : [];
+    const seen = new Set();
+    const out = [];
+    for (const entry of raw) {
+      // Backend populates mediaId; tolerate legacy media/currentTime shapes.
+      const media = entry?.mediaId?._id ? entry.mediaId : entry?.media || entry;
+      const id = media?._id || media?.id;
+      if (!id || seen.has(String(id))) continue;
+      seen.add(String(id));
+      const currentTime =
+        Number(entry?.currentTime ?? entry?.progress ?? media?.progress ?? 0) || 0;
+      const duration = Number(entry?.duration ?? media?.duration ?? 0) || 0;
+      if (duration > 0 && currentTime >= duration * 0.95) continue;
+      const pct = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+      out.push({ ...media, _id: id, progress: pct });
+      if (out.length >= 20) break;
+    }
+    return out;
+  })();
 
   const handleNotify =
     async (streamId) => {
