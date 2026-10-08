@@ -34,6 +34,7 @@ import {
 } from "../api/engagementApi";
 import {
   getFavorites,
+  addFavorite as addFavoriteApi,
   removeFavorite as removeFavoriteApi,
 } from "../api/favoriteApi";
 import MediaRow from "../components/MediaRow";
@@ -86,6 +87,10 @@ export default function DetailsScreen() {
   const [
     favoriteBusy,
     setFavoriteBusy,
+  ] = useState(false);
+  const [
+    commentBusy,
+    setCommentBusy,
   ] = useState(false);
   const [
     loading,
@@ -236,8 +241,11 @@ export default function DetailsScreen() {
         await removeFavoriteApi(media._id);
         removeFavorite(media._id);
       } else {
-        await toggleLike(media._id);
-        storeAddFavorite({ id: media._id, title: media.title, profileId: profile?.id });
+        // Favorites and likes are separate backends: /favorites persists the
+        // library entry, /engagement/like only toggles the like counter.
+        await addFavoriteApi(media._id);
+        await toggleLike(media._id).catch(() => null);
+        storeAddFavorite({ id: media._id, _id: media._id, title: media.title, profileId: profile?.id });
       }
     } catch (err) {
       console.log(err);
@@ -250,6 +258,10 @@ export default function DetailsScreen() {
 
   const handleComment =
     async () => {
+      if (commentBusy) {
+        return;
+      }
+
       try {
         if (
           !commentText.trim()
@@ -258,6 +270,7 @@ export default function DetailsScreen() {
         }
 
         const text = commentText.trim();
+        setCommentBusy(true);
         setCommentText("");
         let posted = null;
         try {
@@ -272,10 +285,17 @@ export default function DetailsScreen() {
         console.log(err);
         Alert.alert(
           "Comment failed",
-          "Please try again."
+          "Your text was kept — please try again."
         );
+      } finally {
+        setCommentBusy(false);
       }
     };
+
+  const creatorId =
+    typeof media?.creatorId === "object"
+      ? media?.creatorId?._id
+      : media?.creatorId || media?.creator;
 
   if (loading) {
     return (
@@ -377,6 +397,24 @@ export default function DetailsScreen() {
               "No description available."}
           </Text>
 
+          {!!creatorId && (
+            <TouchableOpacity
+              style={styles.creatorButton}
+              onPress={() =>
+                router.push({
+                  pathname: "/creator-profile" as any,
+                  params: {
+                    creatorId: String(creatorId),
+                  },
+                })
+              }
+            >
+              <Text style={styles.creatorText}>
+                View Creator Profile
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {media.locked ||
           media.isPremium ? (
             <TouchableOpacity
@@ -474,13 +512,18 @@ export default function DetailsScreen() {
                   AppTheme.colors.textSubtle
                 }
                 style={styles.input}
+                editable={!commentBusy}
               />
               <TouchableOpacity
-                style={styles.postButton}
+                style={[
+                  styles.postButton,
+                  commentBusy && styles.postDisabled,
+                ]}
                 onPress={handleComment}
+                disabled={commentBusy}
               >
                 <Text style={styles.postText}>
-                  Post
+                  {commentBusy ? "Posting..." : "Post"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -574,6 +617,25 @@ const styles =
       lineHeight: AppTheme.typography.body.lineHeight,
       paddingHorizontal: AppTheme.spacing.lg,
       paddingTop: AppTheme.spacing.lg,
+    },
+
+    creatorButton: {
+      minHeight: 44,
+      alignSelf: "flex-start",
+      alignItems: "center",
+      justifyContent: "center",
+      marginHorizontal: AppTheme.spacing.lg,
+      marginTop: AppTheme.spacing.md,
+      paddingHorizontal: 16,
+      borderRadius: AppTheme.radius.md,
+      backgroundColor: AppTheme.colors.surface,
+      borderColor: AppTheme.colors.border,
+      borderWidth: 1,
+    },
+
+    creatorText: {
+      color: AppTheme.colors.accent,
+      fontWeight: "800",
     },
 
     actions: {
@@ -678,6 +740,10 @@ const styles =
         AppTheme.radius.md,
       backgroundColor:
         AppTheme.colors.surfaceSoft,
+    },
+
+    postDisabled: {
+      opacity: 0.5,
     },
 
     postText: {

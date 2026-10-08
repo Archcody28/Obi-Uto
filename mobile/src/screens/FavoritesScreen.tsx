@@ -164,7 +164,7 @@ export default function FavoritesScreen() {
           }
           ListEmptyComponent={
             <Text style={styles.empty}>
-              Titles you save will appear here.
+              Titles you save will appear here. Discover something to watch on Home.
             </Text>
           }
           renderItem={({ item }) => (

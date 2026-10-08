@@ -50,7 +50,29 @@ exports.getMyCreatorProfile =
     }
   };
 
-exports.getMyContent =
+exports.getCreatorById =
+  async (req, res) => {
+    try {
+      const creator =
+        await Creator.findById(
+          req.params.id
+        );
+
+      if (!creator) {
+        return res.status(404).json({
+          message:
+            "Creator not found",
+        });
+      }
+
+      res.json(creator);
+    } catch (err) {
+      res.status(500).json({
+        message:
+          err.message,
+      });
+    }
+  };
   async (req, res) => {
     try {
       const creator =

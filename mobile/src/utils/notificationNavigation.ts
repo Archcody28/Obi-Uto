@@ -90,6 +90,7 @@ export function openNotificationTarget(target: NotificationTarget | null | undef
       break;
 
     case "comment":
+    case "like":
       if (!target.mediaId) {
         Alert.alert(
           "Comment",

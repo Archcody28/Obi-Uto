@@ -58,10 +58,40 @@ export default function LiveChatScreen({
     setGiftAnimation,
   ] = useState(null);
 
+  const [
+    chatLoading,
+    setChatLoading,
+  ] = useState(true);
+
+  const [
+    chatError,
+    setChatError,
+  ] = useState("");
+
+  const [
+    bannedNotice,
+    setBannedNotice,
+  ] = useState("");
+
   useEffect(() => {
+    setChatLoading(true);
+    setChatError("");
+
     getMessages(streamId)
-      .then(setMessages)
-      .catch(console.error);
+      .then((data) => {
+        setMessages(
+          Array.isArray(data) ? data : []
+        );
+      })
+      .catch((err) => {
+        console.error(err);
+        setChatError(
+          "We could not load chat history."
+        );
+      })
+      .finally(() =>
+        setChatLoading(false)
+      );
 
     socket.emit(
       "join-stream",
@@ -92,9 +122,21 @@ export default function LiveChatScreen({
     socket.on(
       "chat-error",
       (error) => {
+        const text =
+          typeof error === "string"
+            ? error
+            : error?.message || "Chat unavailable.";
+
+        if (
+          text.toLowerCase().includes("banned") ||
+          text.toLowerCase().includes("muted")
+        ) {
+          setBannedNotice(text);
+        }
+
         Alert.alert(
           "Chat Error",
-          error
+          text
         );
       }
     );
@@ -157,6 +199,26 @@ export default function LiveChatScreen({
       }
     );
 
+    socket.on(
+      "user-muted",
+      (payload) => {
+        setBannedNotice(
+          "A user was muted by a moderator."
+        );
+        void payload;
+      }
+    );
+
+    socket.on(
+      "user-banned",
+      (payload) => {
+        setBannedNotice(
+          "A user was banned by a moderator."
+        );
+        void payload;
+      }
+    );
+
     return () => {
       socket.emit(
         "leave-stream",
@@ -191,6 +253,14 @@ export default function LiveChatScreen({
 
       socket.off(
         "gift-animation"
+      );
+
+      socket.off(
+        "user-muted"
+      );
+
+      socket.off(
+        "user-banned"
       );
     };
   }, [streamId]);
@@ -380,6 +450,24 @@ export default function LiveChatScreen({
         👁 {viewers} watching
       </Text>
 
+      {chatLoading && (
+        <Text style={styles.notice}>
+          Loading chat history...
+        </Text>
+      )}
+
+      {!!chatError && (
+        <Text style={styles.error}>
+          {chatError} Pull to reopen the stream to retry.
+        </Text>
+      )}
+
+      {!!bannedNotice && (
+        <Text style={styles.notice}>
+          {bannedNotice}
+        </Text>
+      )}
+
       <FlatList
         data={messages}
         keyExtractor={(
@@ -430,6 +518,13 @@ export default function LiveChatScreen({
             </Text>
           </TouchableOpacity>
         )}
+        ListEmptyComponent={
+          !chatLoading ? (
+            <Text style={styles.notice}>
+              No messages yet. Start the conversation.
+            </Text>
+          ) : null
+        }
       />
 
       <TouchableOpacity
@@ -553,6 +648,18 @@ const styles =
       marginBottom: 10,
       fontWeight:
         "800",
+    },
+
+    notice: {
+      color: AppTheme.colors.textMuted,
+      marginBottom: 10,
+      lineHeight: 20,
+    },
+
+    error: {
+      color: AppTheme.colors.danger,
+      marginBottom: 10,
+      lineHeight: 20,
     },
 
     msg: {

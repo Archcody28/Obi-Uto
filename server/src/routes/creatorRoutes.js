@@ -12,6 +12,7 @@ const authMiddleware =
 const {
   createCreator,
   getMyCreatorProfile,
+  getCreatorById,
   getMyContent,
 } = require(
   "../controllers/creatorController"
@@ -33,6 +34,11 @@ router.get(
   "/content",
   authMiddleware,
   getMyContent
+);
+
+router.get(
+  "/:id",
+  getCreatorById
 );
 
 module.exports =

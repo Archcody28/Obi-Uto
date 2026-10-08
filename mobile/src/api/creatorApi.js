@@ -62,6 +62,11 @@ export const getCreatorContent =
     return response.data;
   };
 
+export const getCreatorById = async (creatorId) => {
+  const response = await api.get(`/creators/${creatorId}`);
+  return response.data;
+};
+
 export const deleteContent =
   async (id) => {
     const response =

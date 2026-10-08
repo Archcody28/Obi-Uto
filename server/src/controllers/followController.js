@@ -131,8 +131,33 @@ const getFollowers =
     }
   };
 
+/* GET FOLLOW STATUS — whether the caller follows a creator. */
+
+const getFollowStatus =
+  async (req, res) => {
+    try {
+      const existing =
+        await Follow.findOne({
+          userId:
+            req.user.id,
+          creatorId:
+            req.params.creatorId,
+        });
+
+      res.json({
+        following: Boolean(existing),
+      });
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err.message,
+      });
+    }
+  };
+
 module.exports = {
   followCreator,
   unfollowCreator,
   getFollowers,
+  getFollowStatus,
 };
