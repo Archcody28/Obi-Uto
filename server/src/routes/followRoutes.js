@@ -11,12 +11,19 @@ const {
   unfollowCreator,
   getFollowers,
   getFollowStatus,
+  getMyFollows,
 } = require(
   "../controllers/followController"
 );
 
 const router =
   express.Router();
+
+router.get(
+  "/me",
+  authMiddleware,
+  getMyFollows
+);
 
 router.post(
   "/follow",

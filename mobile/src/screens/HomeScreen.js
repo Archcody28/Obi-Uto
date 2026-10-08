@@ -36,6 +36,7 @@ import {
 import {
   getDiscovery,
 } from "../api/liveStreamApi";
+import { getMyFollows } from "../api/followApi";
 import HeroBanner from "../components/HeroBanner";
 import MediaRow from "../components/MediaRow";
 import LiveCountdown from "../components/LiveCountdown";
@@ -97,6 +98,10 @@ export default function HomeScreen() {
   const [
     forYou,
     setForYou,
+  ] = useState([]);
+  const [
+    followed,
+    setFollowed,
   ] = useState([]);
   const [
     discovery,
@@ -161,6 +166,7 @@ export default function HomeScreen() {
         continueData,
         forYouData,
         discoveryData,
+        followedData,
       ] = await Promise.all([
         getTrending(),
         getSimilar(),
@@ -168,6 +174,7 @@ export default function HomeScreen() {
         continueWatching(),
         getForYou(),
         getDiscovery(),
+        getMyFollows().catch(() => []),
       ]);
 
       setTrending(
@@ -184,6 +191,9 @@ export default function HomeScreen() {
       );
       setForYou(
         forYouData || []
+      );
+      setFollowed(
+        Array.isArray(followedData) ? followedData : []
       );
       setDiscovery(
         discoveryData?.data || {
@@ -240,6 +250,22 @@ export default function HomeScreen() {
     }
     return out;
   })();
+
+  // Avoid repeating the same title across rails: Continue Watching wins,
+  // then Trending / For You / Recommended / Because You Watched, in order.
+  const continueIds = useMemo(
+    () => new Set(continueMedia.map((item) => String(item?._id || item?.id))),
+    [continueMedia]
+  );
+  const withoutIds = (items = [], exclude = new Set()) => {
+    const seen = new Set();
+    return (Array.isArray(items) ? items : []).filter((item) => {
+      const id = String(item?._id || item?.id || "");
+      if (!id || exclude.has(id) || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
 
   const handleNotify =
     async (streamId) => {
@@ -395,6 +421,17 @@ export default function HomeScreen() {
             <TouchableOpacity
               style={styles.quickAction}
               onPress={() =>
+                router.push("/following")
+              }
+            >
+              <Text style={styles.quickText}>
+                Following
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickAction}
+              onPress={() =>
                 router.push(
                   "/coin-store"
                 )
@@ -442,9 +479,48 @@ export default function HomeScreen() {
           <MediaRow
             title="Trending"
             data={filterContent(
-              trending
+              withoutIds(trending, continueIds)
             )}
           />
+
+          {!!followed?.length && (
+            <View>
+              <Text style={styles.sectionTitle}>
+                Following
+              </Text>
+              <FlatList
+                horizontal
+                data={followed.slice(0, 20)}
+                keyExtractor={(item, index) =>
+                  String(item._id || item.id || index)
+                }
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.scheduledList}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.scheduledCard}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/creator-profile",
+                        params: {
+                          creatorId: String(item._id || item.id),
+                        },
+                      })
+                    }
+                  >
+                    <Text style={styles.scheduledTitle} numberOfLines={2}>
+                      {item.displayName || item.name || "Creator"}
+                    </Text>
+                    <Text style={styles.emptyText}>
+                      {typeof item.followers === "number"
+                        ? `${item.followers} followers`
+                        : "View profile"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          )}
 
           <MediaRow
             title="For You"

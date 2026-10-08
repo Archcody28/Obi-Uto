@@ -177,6 +177,12 @@ export default function CreatorProfileScreen() {
       }
       ListHeaderComponent={
         <>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.backText}>{"< Back"}</Text>
+          </TouchableOpacity>
           <Text style={styles.kicker}>
             Creator
           </Text>
@@ -273,6 +279,21 @@ const styles = StyleSheet.create({
 
   content: {
     padding: 20,
+  },
+
+  backBtn: {
+    alignSelf: "flex-start",
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderRadius: AppTheme.radius.sm,
+    backgroundColor: AppTheme.colors.surfaceSoft,
+    marginBottom: 12,
+  },
+
+  backText: {
+    color: AppTheme.colors.text,
+    fontWeight: "800",
   },
 
   kicker: {

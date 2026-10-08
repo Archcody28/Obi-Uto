@@ -795,7 +795,7 @@ export default function PlayerScreen() {
 
       await addFavoriteApi(mediaId);
 
-      addFavorite({ id: mediaId, title, profileId: profile?.id });
+      addFavorite({ id: mediaId, _id: mediaId, title, profileId: profile?.id });
 
       Alert.alert("Success", "Saved To Favorites");
     } catch (err: any) {

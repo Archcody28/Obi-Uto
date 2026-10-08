@@ -155,9 +155,35 @@ const getFollowStatus =
     }
   };
 
+/* GET MY FOLLOWED CREATORS — authenticated user's followed creators. */
+
+const getMyFollows =
+  async (req, res) => {
+    try {
+      const follows =
+        await Follow.find({
+          userId:
+            req.user.id,
+        }).populate("creatorId");
+
+      const creators =
+        follows
+          .map((entry) => entry.creatorId)
+          .filter(Boolean);
+
+      res.json(creators);
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err.message,
+      });
+    }
+  };
+
 module.exports = {
   followCreator,
   unfollowCreator,
   getFollowers,
   getFollowStatus,
+  getMyFollows,
 };

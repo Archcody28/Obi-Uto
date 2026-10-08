@@ -33,6 +33,7 @@ const notificationSchema =
           "system",
           "follow",
           "comment",
+          "like",
         ],
         default: "system",
       },

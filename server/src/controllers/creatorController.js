@@ -73,6 +73,26 @@ exports.getCreatorById =
       });
     }
   };
+
+exports.getCreatorContent =
+  async (req, res) => {
+    try {
+      const content =
+        await Media.find({
+          creatorId:
+            req.params.id,
+        });
+
+      res.json(content);
+    } catch (err) {
+      res.status(500).json({
+        message:
+          err.message,
+      });
+    }
+  };
+
+exports.getMyContent =
   async (req, res) => {
     try {
       const creator =

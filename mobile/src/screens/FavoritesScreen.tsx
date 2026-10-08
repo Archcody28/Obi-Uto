@@ -156,8 +156,8 @@ export default function FavoritesScreen() {
       ) : (
         <FlatList
           data={combined}
-          keyExtractor={(item) =>
-            item.mediaId
+          keyExtractor={(item, index) =>
+            String(item.mediaId || item._id || item.id || index)
           }
           contentContainerStyle={
             styles.list

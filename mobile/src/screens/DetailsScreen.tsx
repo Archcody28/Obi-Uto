@@ -146,11 +146,14 @@ export default function DetailsScreen() {
             : favorites?.favorites || favorites?.data || [];
 
           setLiked(
-            list.some(
-              (entry: any) =>
-                (entry?.media?._id || entry?.media || entry?._id) ===
-                (data?._id || id)
-            )
+            list.some((entry: any) => {
+              const raw = entry?.media;
+              const entryId =
+                typeof raw === "object"
+                  ? raw?._id || raw?.id
+                  : raw || entry?._id || entry?.id;
+              return String(entryId) === String(data?._id || id);
+            })
           );
         } catch (favErr) {
           console.log(favErr);

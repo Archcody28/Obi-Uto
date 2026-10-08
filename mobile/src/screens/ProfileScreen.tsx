@@ -189,6 +189,13 @@ export default function ProfileScreen() {
           }
         />
         <Action
+          title="Following"
+          subtitle="Creators you follow"
+          onPress={() =>
+            router.push("/following" as any)
+          }
+        />
+        <Action
           title="Notifications"
           subtitle="Alerts, uploads, and donations"
           onPress={() =>

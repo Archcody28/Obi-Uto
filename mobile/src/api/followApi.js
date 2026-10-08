@@ -34,3 +34,10 @@ export const unfollowCreator =
 
     return response.data;
   };
+export const getMyFollows = async () => {
+  const response = await api.get("/follows/me");
+  const payload = response.data;
+  return Array.isArray(payload)
+    ? payload
+    : payload?.creators || payload?.data || [];
+};
