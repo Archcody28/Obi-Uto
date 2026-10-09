@@ -177,6 +177,15 @@ exports.restoreMedia = async (req, res) => {
   try {
     const media = await Media.findById(req.params.id);
     if (!media) return res.status(404).json({ success: false, message: "Media not found" });
+    media.isHidden = false;
+    media.hiddenBy = null;
+    media.hiddenAt = null;
+    await media.save();
+    return res.json({ success: true, message: "Media restored", media: { _id: media._id, isHidden: false } });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Failed to restore media" });
+  }
+};
 // POST /api/admin/users/:id/warn { message }
 exports.warnUser = async (req, res) => {
   try {
@@ -250,14 +259,5 @@ exports.listMedia = async (req, res) => {
     return res.json({ success: true, media: items, pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 } });
   } catch (err) {
     return res.status(500).json({ success: false, message: "Failed to load media" });
-  }
-};
-    media.isHidden = false;
-    media.hiddenBy = null;
-    media.hiddenAt = null;
-    await media.save();
-    return res.json({ success: true, message: "Media restored", media: { _id: media._id, isHidden: false } });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: "Failed to restore media" });
   }
 };
