@@ -161,6 +161,8 @@ app.use("/api/subscription-plans", subscriptionRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/engagement", engagementRoutes);
 app.use("/api/admin", adminRoutes);
+const reportRoutes = require("./routes/reportRoutes");
+app.use("/api/reports", reportRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/favorites", favoriteRoutes);
 app.use("/api/follows", followRoutes);

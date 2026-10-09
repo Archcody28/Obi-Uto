@@ -246,6 +246,28 @@ export default function ProfileScreen() {
         />
       </View>
 
+      {user && user.role === "admin" && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Administration
+          </Text>
+          <Action
+            title="Admin Dashboard"
+            subtitle="Stats, reports, and moderation"
+            onPress={() =>
+              router.push("/admin" as any)
+            }
+          />
+          <Action
+            title="Moderate Media"
+            subtitle="Hide, restore, or remove titles"
+            onPress={() =>
+              router.push("/admin-media" as any)
+            }
+          />
+        </View>
+      )}
+
       <TouchableOpacity
         style={styles.logout}
         onPress={handleLogout}

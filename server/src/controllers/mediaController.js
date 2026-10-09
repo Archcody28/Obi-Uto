@@ -14,24 +14,30 @@ const {
 
  const getHomeMedia = async (req, res) => {
   try {
+    // Hidden (moderated) media is excluded from public listings.
+    const hidden = { isHidden: { $ne: true } };
     const movies = await Media.find({
       type: "movie",
       status: "published",
+      ...hidden,
     }).limit(10);
 
     const series = await Media.find({
       type: "series",
       status: "published",
+      ...hidden,
     }).limit(10);
 
     const music = await Media.find({
       type: "music",
       status: "published",
+      ...hidden,
     }).limit(10);
 
     const podcasts = await Media.find({
       type: "podcast",
       status: "published",
+      ...hidden,
     }).limit(10);
 
     res.json({

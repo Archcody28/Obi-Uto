@@ -51,6 +51,29 @@ const userSchema = new mongoose.Schema(
   default: "user",
 },
 
+    // Minimal moderation state. Suspended users keep their document
+    // (no destructive deletes); authMiddleware rejects them with 403.
+    isSuspended: {
+      type: Boolean,
+      default: false,
+    },
+
+    suspensionReason: {
+      type: String,
+      default: "",
+    },
+
+    suspendedAt: {
+      type: Date,
+      default: null,
+    },
+
+    suspendedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
 referralCode: {
   type: String,
   unique: true,

@@ -122,6 +122,25 @@ tags: [
       default: false,
     },
 
+    // Minimal moderation state. Hidden media stays in the database and
+    // is excluded from public listings; admins can restore it.
+    isHidden: {
+      type: Boolean,
+      default: false,
+    },
+
+    hiddenBy: {
+      type:
+        mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    hiddenAt: {
+      type: Date,
+      default: null,
+    },
+
     seriesInfo: {
   seasonNumber: {
     type: Number,
