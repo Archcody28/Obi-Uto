@@ -95,27 +95,80 @@ const {
   }
 };
 
-// SEARCH MEDIA
+// SEARCH MEDIA — PHASE 27 unified: creator + Internet Archive.
+// GET /api/media/search?q=... -> { query, results, creatorCount, externalCount, externalUnavailable }
+// Backward compatible: `results` is the merged array (creator first).
  const searchMedia = async (req, res) => {
   try {
-    let q = req.query.q || "";
+    let raw = req.query.q;
+    if (raw !== undefined && typeof raw !== "string") raw = "";
+    raw = typeof raw === "string" ? raw : "";
+    const query = raw.trim().slice(0, 100);
+    if (!query) {
+      return res.status(400).json({ message: "Search query is required", query: "", results: [], creatorCount: 0, externalCount: 0, externalUnavailable: false });
+    }
 
     // Enforce string type and length (prevents operator injection / regex DoS)
-    if (typeof q !== "string") {
-      q = "";
+    // Escape regex special characters for the creator query.
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Creator search (existing MongoDB capability): published, not hidden.
+    // Runs even if the provider is down; provider failure never destroys these.
+    let creatorDocs = [];
+    try {
+      creatorDocs = await Media.find({
+        title: { $regex: escaped, $options: "i" },
+        status: "published",
+        isHidden: { $ne: true },
+      }).limit(20).lean();
+    } catch (dbErr) {
+      creatorDocs = [];
     }
-    q = q.trim().slice(0, 100);
-    // Escape regex special characters
-    q = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    const results = await Media.find({
-      title: {
-        $regex: q,
-        $options: "i",
-      },
-    }).limit(50);
+    // External search: ONE provider request via Phase 26 service (cache/
+    // timeout/sanitization preserved inside the service). Never throws.
+    let externalItems = [];
+    let externalUnavailable = false;
+    try {
+      const externalMediaService = require("../services/externalMediaService");
+      const out = await externalMediaService.searchExternal(query, 10);
+      externalItems = Array.isArray(out.items) ? out.items : [];
+      externalUnavailable = !!out.unavailable;
+    } catch (extErr) {
+      externalItems = [];
+      externalUnavailable = true;
+    }
 
-    res.json(results);
+    // Deterministic merge + dedupe: creator first (sorted by title), then
+    // external (provider order). Dedupe on normalized id; creator ids win.
+    const seen = new Set();
+    const results = [];
+    const creatorSorted = creatorDocs.slice().sort((a, b) =>
+      String(a.title || "").localeCompare(String(b.title || ""))
+    );
+    for (const doc of creatorSorted) {
+      const key = String(doc._id || doc.id || "");
+      if (!key || seen.has("c:" + key)) continue;
+      seen.add("c:" + key);
+      results.push(doc);
+    }
+    for (const item of externalItems) {
+      const key = String(item._id || item.id || "");
+      if (!key || seen.has("e:" + key)) continue;
+      // Guard: external ids must stay ia:-namespaced; skip anything else.
+      if (key.indexOf("ia:") !== 0) continue;
+      seen.add("e:" + key);
+      results.push(item);
+      if (results.length >= 30) break;
+    }
+
+    return res.json({
+      query,
+      results,
+      creatorCount: creatorSorted.length,
+      externalCount: externalItems.length,
+      externalUnavailable,
+    });
   } catch (error) {
     res.status(500).json({
       error: error.message,

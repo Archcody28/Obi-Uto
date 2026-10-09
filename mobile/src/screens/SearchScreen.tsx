@@ -1,4 +1,6 @@
 import React, {
+  useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -30,6 +32,20 @@ export default function SearchScreen() {
     useState("");
   const [searched, setSearched] =
     useState(false);
+  // PHASE 27 — unified contract meta (single search box, both sources).
+  const [creatorCount, setCreatorCount] = useState(0);
+  const [externalCount, setExternalCount] = useState(0);
+  const [externalUnavailable, setExternalUnavailable] = useState(false);
+  // Debounce typing so we don't spam the provider on every keystroke;
+  // submit still searches immediately. Guard against out-of-order responses.
+  const debounceRef = useRef<any>(null);
+  const requestRef = useRef(0);
+
+  const resetMeta = () => {
+    setCreatorCount(0);
+    setExternalCount(0);
+    setExternalUnavailable(false);
+  };
 
   const doSearch =
     async (q: string) => {
@@ -39,9 +55,11 @@ export default function SearchScreen() {
         setResults([]);
         setSearched(false);
         setError("");
+        resetMeta();
         return;
       }
 
+      const myRequest = ++requestRef.current;
       setLoading(true);
       setError("");
 
@@ -49,21 +67,57 @@ export default function SearchScreen() {
         const data =
           await searchMedia(term);
 
-        setResults(data || []);
+        if (requestRef.current !== myRequest) return;
+        // searchMedia normalizes legacy arrays too; external items keep
+        // source:"external" + ia: ids and render via existing MediaCard/
+        // Details/Player flow (Phase 26 restrictions enforced there).
+        const list = Array.isArray(data)
+          ? data
+          : data?.results || [];
+        setResults(list);
+        setCreatorCount(Array.isArray(data) ? list.length : data?.creatorCount ?? 0);
+        setExternalCount(Array.isArray(data) ? 0 : data?.externalCount ?? 0);
+        setExternalUnavailable(Array.isArray(data) ? false : !!data?.externalUnavailable);
         setSearched(true);
       } catch (err: any) {
+        if (requestRef.current !== myRequest) return;
         console.log(err);
+        // Empty-query rejections come back 400 — surface honestly, keep prior.
         setError(
           err?.response?.data
-            ?.error ||
+            ?.message ||
+            err?.response?.data
+              ?.error ||
             "Search failed. Please try again."
         );
         setResults([]);
+        resetMeta();
         setSearched(true);
       } finally {
-        setLoading(false);
+        if (requestRef.current === myRequest) setLoading(false);
       }
     };
+
+  // Debounced search-as-you-type (500ms); submit searches immediately.
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const term = (query ?? "").trim();
+    if (!term) {
+      setResults([]);
+      setSearched(false);
+      setError("");
+      resetMeta();
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    debounceRef.current = setTimeout(() => doSearch(query), 500);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [query]);
+
+  const retry = () => doSearch(query);
 
   return (
     <View
@@ -111,9 +165,14 @@ export default function SearchScreen() {
       )}
 
       {!!error && (
-        <Text style={styles.error}>
-          {error}
-        </Text>
+        <View style={styles.stateCard}>
+          <Text style={styles.error}>
+            {error}
+          </Text>
+          <Text style={styles.retry} onPress={retry}>
+            Tap to retry
+          </Text>
+        </View>
       )}
 
       {searched &&
@@ -121,14 +180,14 @@ export default function SearchScreen() {
         !error &&
         results.length === 0 && (
           <Text style={styles.empty}>
-            No results found.
+            No results found. Try another title.
           </Text>
         )}
 
       <FlatList
         data={results}
-        keyExtractor={(item: any) =>
-          item._id?.toString()
+        keyExtractor={(item: any, index: number) =>
+          (item._id?.toString() || item.id?.toString() || `row-${index}`)
         }
         numColumns={2}
         columnWrapperStyle={
@@ -139,12 +198,20 @@ export default function SearchScreen() {
         }
         ListHeaderComponent={
           results.length > 0 ? (
-            <Text style={styles.heading}>
-              {results.length} result
-              {results.length === 1
-                ? ""
-                : "s"}
-            </Text>
+            <View>
+              <Text style={styles.heading}>
+                {results.length} result
+                {results.length === 1
+                  ? ""
+                  : "s"}
+                {` • ${creatorCount} Obi-Uto • ${externalCount} Archive`}
+              </Text>
+              {externalUnavailable && (
+                <Text style={styles.providerNote}>
+                  Internet Archive results unavailable — showing Obi-Uto titles.
+                </Text>
+              )}
+            </View>
           ) : null
         }
         renderItem={({ item }) => (
@@ -226,6 +293,19 @@ const styles =
     error: {
       color: AppTheme.colors.danger,
       marginBottom: 12,
+    },
+
+    retry: {
+      color: AppTheme.colors.accent,
+      fontWeight: "800",
+      marginTop: 8,
+    },
+
+    providerNote: {
+      color:
+        AppTheme.colors.textMuted,
+      marginTop: 4,
+      marginBottom: 8,
     },
 
     empty: {

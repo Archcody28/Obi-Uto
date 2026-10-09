@@ -239,11 +239,57 @@ async function getExternalHome(limit) {
   return out;
 }
 
+async function searchExternal(query, limit) {
+  const per = clampInt(limit, 10, 1, 20);
+  const clean = sanitizeText(query, 100).trim();
+  if (!clean) return { items: [], unavailable: false };
+  if (!isEnabled()) return { items: [], unavailable: true };
+  // Single provider request (bounded): full-text query restricted to
+  // audio/video mediatypes; rows clamped. Never throws — caller merges.
+  const key = "ext:search:" + clean.toLowerCase() + ":" + per;
+  const hit = cacheGet(key);
+  if (hit) return hit;
+  try {
+    const res = await axios.get(SEARCH_URL, {
+      params: {
+        q: "(" + clean.replace(/[()]/g, "") + ") AND mediatype:(movies OR audio)",
+        "fl[]": ["identifier", "title", "description", "licenseurl", "year", "mediatype"],
+        rows: per, page: 1, output: "json",
+      },
+      timeout: TIMEOUT_MS,
+    });
+    const docs = (res.data && res.data.response && res.data.response.docs) || [];
+    const items = [];
+    const seenIds = new Set();
+    for (const doc of docs) {
+      if (items.length >= per) break;
+      // Never expose raw provider objects: normalize through baseItem only.
+      // Malformed rows (bad identifier) are skipped, never faked.
+      try {
+        const mt = String(
+          Array.isArray(doc.mediatype) ? doc.mediatype[0] : doc.mediatype || ""
+        ).toLowerCase();
+        const category = mt.indexOf("audio") !== -1 ? "music" : "movies";
+        const base = baseItem(category, doc);
+        if (!base || seenIds.has(base._id)) continue;
+        seenIds.add(base._id);
+        items.push(base);
+      } catch (rowErr) { /* skip malformed row */ }
+    }
+    const out = { items, unavailable: false };
+    cacheSet(key, out);
+    return out;
+  } catch (err) {
+    return { items: [], unavailable: true };
+  }
+}
+
 module.exports = {
   PROVIDER,
   CATEGORIES: Object.keys(CATEGORIES),
   getExternalHome,
   getExternalItem,
+  searchExternal,
   isExternalId: (id) => typeof id === "string" && id.indexOf("ia:") === 0,
   identifierFromId: (id) => {
     if (typeof id !== "string" || id.indexOf("ia:") !== 0) return null;
