@@ -27,8 +27,8 @@ export default function MediaRow({
         contentContainerStyle={
           styles.listContent
         }
-        keyExtractor={(item) =>
-  item._id?.toString()
+        keyExtractor={(item, index) =>
+  (item._id && item._id.toString()) || (item.id && item.id.toString()) || item.externalId || 'row-' + index
 }
         renderItem={({ item }) => (
           <MediaCard item={item} />

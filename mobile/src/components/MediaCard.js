@@ -22,6 +22,11 @@ export default function MediaCard({
   const [errored, setErrored] =
     useState(false);
 
+  // PHASE 26 — external items are visually distinct and carry attribution.
+  const isExternal =
+    item?.source === "external" ||
+    (typeof item?._id === "string" && item._id.indexOf("ia:") === 0);
+
   const handlePress =
     onPress ||
     (() =>
@@ -141,13 +146,22 @@ export default function MediaCard({
         {item?.title}
       </Text>
 
-      {!!item?.type && (
+      {isExternal ? (
         <Text
-          style={styles.meta}
+          style={styles.externalMeta}
           numberOfLines={1}
         >
-          {item.type}
+          {item?.provider || "Internet Archive"} • External
         </Text>
+      ) : (
+        !!item?.type && (
+          <Text
+            style={styles.meta}
+            numberOfLines={1}
+          >
+            {item.type}
+          </Text>
+        )
       )}
     </Pressable>
   );
@@ -210,6 +224,16 @@ const styles = StyleSheet.create({
         .fontSize,
     textTransform:
       "capitalize",
+  },
+
+  externalMeta: {
+    color:
+      AppTheme.colors.accent,
+    marginTop: 2,
+    fontSize:
+      AppTheme.typography.caption
+        .fontSize,
+    fontWeight: "700",
   },
 
   imageFallback: {

@@ -76,6 +76,8 @@ export default function HomeScreen() {
     series,
     music,
     podcasts,
+    external,
+    externalUnavailable,
     fetchMedia,
   } = useMediaStore();
 
@@ -573,6 +575,45 @@ export default function HomeScreen() {
             title="Podcasts"
             data={podcasts}
           />
+
+          {/* PHASE 26 — external media (Internet Archive). Creator media
+              remains first-class: these rails render ONLY when creator
+              inventory is empty. Attribution is on every card + section. */}
+          {!!external && !externalUnavailable && (
+            <>
+              {!!external.movies?.length && (
+                <MediaRow
+                  title="External Films • Internet Archive"
+                  data={external.movies}
+                />
+              )}
+              {!!external.series?.length && (
+                <MediaRow
+                  title="External Classics • Internet Archive"
+                  data={external.series}
+                />
+              )}
+              {!!external.music?.length && (
+                <MediaRow
+                  title="External Music • Internet Archive"
+                  data={external.music}
+                />
+              )}
+              {!!external.podcasts?.length && (
+                <MediaRow
+                  title="External Radio • Internet Archive"
+                  data={external.podcasts}
+                />
+              )}
+            </>
+          )}
+
+          {!!externalUnavailable && (
+            <Text style={styles.emptyText}>
+              External catalog unavailable right now — creator titles still
+              appear above when published.
+            </Text>
+          )}
         </>
       )}
     </ScrollView>

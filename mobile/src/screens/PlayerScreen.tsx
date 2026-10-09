@@ -39,6 +39,7 @@ import {
 import {
   getEpisodes,
   getMediaDetails,
+  isExternalMedia as checkExternal,
 } from "../api/mediaApi";
 
 import {
@@ -823,6 +824,18 @@ export default function PlayerScreen() {
 
   const handleFavorite = async () => {
     try {
+      // PHASE 26 — favorites are creator-only; never fake success on external.
+      if (
+        checkExternal({ _id: mediaId }) ||
+        (typeof mediaId === "string" && mediaId.indexOf("ia:") === 0)
+      ) {
+        Alert.alert(
+          "Not available for external titles",
+          "Favorites only work on Obi-Uto creator uploads."
+        );
+        return;
+      }
+
       if (!mediaId) {
         Alert.alert("Error", "Media ID missing");
         return;
@@ -965,6 +978,12 @@ export default function PlayerScreen() {
 
       {!isLive && !localUri && (
         <View>
+          {(typeof mediaId === "string" && mediaId.indexOf("ia:") === 0) ? (
+            <Text style={styles.downloadError}>
+              Downloads are available on Obi-Uto creator uploads only —
+              external titles stream from Internet Archive.
+            </Text>
+          ) : (
           <TouchableOpacity
             style={[
               styles.downloadBtn,
@@ -991,6 +1010,7 @@ export default function PlayerScreen() {
                       : "Download"}
             </Text>
           </TouchableOpacity>
+          )}
 
           {downloadEntry?.status === "downloading" && (
             <View style={styles.progressTrack}>

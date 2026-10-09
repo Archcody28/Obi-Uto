@@ -40,16 +40,58 @@ const {
       ...hidden,
     }).limit(10);
 
+    const totalCreator =
+      movies.length + series.length + music.length + podcasts.length;
+
+    // PHASE 26 — external media appears only when creator inventory is empty.
+    // Creator media remains first-class; provider failure never crashes Home.
+    let external = null;
+    if (totalCreator === 0) {
+      try {
+        const externalMediaService = require("../services/externalMediaService");
+        external = await externalMediaService.getExternalHome(8);
+      } catch (extErr) {
+        external = {
+          movies: [], series: [], music: [], podcasts: [],
+          unavailable: true,
+          provider: "Internet Archive",
+        };
+      }
+    }
+
     res.json({
       movies,
       series,
       music,
       podcasts,
+      external,
     });
   } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
+    // PHASE 26 — creator DB failure must not crash Home: serve external
+    // media as a last resort (still no fake data, no throw).
+    try {
+      const externalMediaService = require("../services/externalMediaService");
+      const external = await externalMediaService.getExternalHome(8);
+      return res.json({
+        movies: [],
+        series: [],
+        music: [],
+        podcasts: [],
+        external,
+      });
+    } catch (fallbackErr) {
+      return res.json({
+        movies: [],
+        series: [],
+        music: [],
+        podcasts: [],
+        external: {
+          movies: [], series: [], music: [], podcasts: [],
+          unavailable: true,
+          provider: "Internet Archive",
+        },
+      });
+    }
   }
 };
 
@@ -121,6 +163,28 @@ const {
 // GET SINGLE MEDIA
  const getMediaById = async (req, res) => {
   try {
+    // PHASE 26 — external items resolve via the provider, never the DB.
+    // External ids are stable "ia:<identifier>" strings, so they never
+    // collide with Mongo ObjectIds and never touch creator logic
+    // (views/revenue/favorites/comments stay creator-only).
+    const rawId = req.params.id;
+    if (typeof rawId === "string" && rawId.indexOf("ia:") === 0) {
+      try {
+        const externalMediaService = require("../services/externalMediaService");
+        const identifier = externalMediaService.identifierFromId(rawId);
+        if (!identifier) {
+          return res.status(404).json({ message: "Media not found" });
+        }
+        const item = await externalMediaService.getExternalItem(identifier);
+        if (!item) {
+          return res.status(404).json({ message: "Media not found" });
+        }
+        return res.json(item);
+      } catch (extErr) {
+        return res.status(502).json({ message: "External provider unavailable" });
+      }
+    }
+
     const media =
   await Media.findById(
     req.params.id

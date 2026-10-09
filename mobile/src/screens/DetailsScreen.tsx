@@ -23,6 +23,7 @@ import {
 import {
   getMediaDetails,
   getEpisodes,
+  isExternalMedia as checkExternal,
 } from "../api/mediaApi";
 import {
   getSimilar,
@@ -302,6 +303,15 @@ export default function DetailsScreen() {
       ? media?.creatorId?._id
       : media?.creatorId || media?.creator;
 
+  // PHASE 26 — external items reuse Details/Player but creator-only actions
+  // (favorites, follows, comments, downloads) are disabled honestly.
+  const isExternal = checkExternal(media);
+  const noCreatorActions = (label) =>
+    Alert.alert(
+      "Not available for external titles",
+      `${label} only works on Obi-Uto creator uploads. This title is provided by ${media?.provider || "Internet Archive"}.`
+    );
+
   if (loading) {
     return (
       <View style={styles.state}>
@@ -374,11 +384,18 @@ export default function DetailsScreen() {
           >
             <View style={styles.heroShade}>
               <Text style={styles.kicker}>
-                {media.type || "Title"}
+                {isExternal
+                  ? `External • ${media.provider || "Internet Archive"}`
+                  : media.type || "Title"}
               </Text>
               <Text style={styles.title}>
                 {media.title}
               </Text>
+              {!!isExternal && !!media.attribution && (
+                <Text style={styles.attribution}>
+                  {media.attribution}
+                </Text>
+              )}
               <Text style={styles.meta}>
                 {[
                   media.releaseYear,
@@ -450,15 +467,21 @@ export default function DetailsScreen() {
 
               <TouchableOpacity
                 style={styles.secondaryButton}
-                onPress={handleFavorite}
-                disabled={favoriteBusy}
+                onPress={() =>
+                  isExternal
+                    ? noCreatorActions("Favorites")
+                    : handleFavorite()
+                }
+                disabled={favoriteBusy || isExternal}
               >
                 <Text style={styles.secondaryText}>
-                  {favoriteBusy
-                    ? "Saving..."
-                    : liked
-                      ? "★ Favorited — Remove"
-                      : "☆ Favorite"}
+                  {isExternal
+                    ? "☆ Favorite (creator titles only)"
+                    : favoriteBusy
+                      ? "Saving..."
+                      : liked
+                        ? "★ Favorited — Remove"
+                        : "☆ Favorite"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -506,32 +529,39 @@ export default function DetailsScreen() {
             <Text style={styles.sectionTitle}>
               Comments
             </Text>
-            <View style={styles.commentBox}>
-              <TextInput
-                value={commentText}
-                onChangeText={
-                  setCommentText
-                }
-                placeholder="Add a comment..."
-                placeholderTextColor={
-                  AppTheme.colors.textSubtle
-                }
-                style={styles.input}
-                editable={!commentBusy}
-              />
-              <TouchableOpacity
-                style={[
-                  styles.postButton,
-                  commentBusy && styles.postDisabled,
-                ]}
-                onPress={handleComment}
-                disabled={commentBusy}
-              >
-                <Text style={styles.postText}>
-                  {commentBusy ? "Posting..." : "Post"}
-                </Text>
-              </TouchableOpacity>
-            </View>
+            {isExternal ? (
+              <Text style={styles.emptyText}>
+                Comments are available on Obi-Uto creator uploads only —
+                external titles are read-only.
+              </Text>
+            ) : (
+              <View style={styles.commentBox}>
+                <TextInput
+                  value={commentText}
+                  onChangeText={
+                    setCommentText
+                  }
+                  placeholder="Add a comment..."
+                  placeholderTextColor={
+                    AppTheme.colors.textSubtle
+                  }
+                  style={styles.input}
+                  editable={!commentBusy}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.postButton,
+                    commentBusy && styles.postDisabled,
+                  ]}
+                  onPress={handleComment}
+                  disabled={commentBusy}
+                >
+                  <Text style={styles.postText}>
+                    {commentBusy ? "Posting..." : "Post"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </>
       }
@@ -697,6 +727,15 @@ const styles =
       fontSize: AppTheme.typography.heading.fontSize,
       fontWeight: AppTheme.typography.heading.fontWeight,
       marginBottom: AppTheme.spacing.md,
+    },
+
+    // PHASE 26 — external attribution line.
+    attribution: {
+      color: AppTheme.colors.accent,
+      fontSize: AppTheme.typography.caption.fontSize,
+      fontWeight: "700",
+      marginTop: 6,
+      lineHeight: 16,
     },
 
     episode: {
