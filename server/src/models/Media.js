@@ -1,5 +1,9 @@
 const mongoose = require("mongoose");
 
+const {
+  buildDownloadUrl,
+} = require("../utils/mediaDownload");
+
 const mediaSchema = new mongoose.Schema(
   {
     title: {
@@ -73,6 +77,14 @@ tags: [
 
     videoUrl: {
       type: String, // HLS or MP4
+    },
+
+    // Explicit downloadable single-file representation (e.g. MP4) for
+    // offline saves. Null/absent means the title genuinely has no
+    // downloadable file (e.g. streaming-only HLS media).
+    downloadUrl: {
+      type: String,
+      default: null,
     },
 
     audioUrl: {
@@ -169,5 +181,20 @@ trendingScore: {
   },
   { timestamps: true }
 );
+
+// Expose the downloadable representation through every media API response.
+// Legacy documents (created before `downloadUrl` existed, e.g. seeded or
+// admin-created rows) get the value computed on serialization so clients
+// always see an explicit `downloadUrl` field: a real file URL or null when
+// the media is streaming-only.
+mediaSchema.set("toJSON", {
+  virtuals: false,
+  transform: function (doc, ret) {
+    if (ret.downloadUrl === undefined || ret.downloadUrl === null || ret.downloadUrl === "") {
+      ret.downloadUrl = buildDownloadUrl(ret) || null;
+    }
+    return ret;
+  },
+});
 
 module.exports = mongoose.model("Media", mediaSchema);

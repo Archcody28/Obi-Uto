@@ -117,6 +117,15 @@ export default function RootLayout() {
     restoreAuth();
   }, [restoreAuth]);
 
+  // Load (and filesystem-verify) offline downloads once at startup so the
+  // player and Downloads screen see honest state immediately.
+  useEffect(() => {
+    useDownloadStore
+      .getState()
+      .loadDownloads()
+      .catch(console.error);
+  }, []);
+
   useEffect(() => {
     if (isRestoring) {
       return;

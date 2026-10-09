@@ -1,5 +1,6 @@
 const Media = require("../models/Media");
 const Creator = require("../models/Creator");
+const { buildDownloadUrl } = require("../utils/mediaDownload");
 const TYPES = ["movie", "series", "music", "song", "podcast"];
 function bad(res, code, message) { return res.status(code).json({ message: message }); }
 async function needCreator(req, res) {
@@ -32,10 +33,16 @@ exports.createContent = async function (req, res) {
     if (thumbnail && thumbnail.indexOf("http://") !== 0 && thumbnail.indexOf("https://") !== 0) {
       return bad(res, 400, "Thumbnail URL is malformed. Re-upload the thumbnail.");
     }
+    // Resolve the downloadable representation server-side so published
+    // creator uploads immediately carry an explicit `downloadUrl` (an
+    // original MP4 is reused as-is; other stored video formats get the
+    // provider's MP4 delivery URL; streaming-only media stays null).
+    const downloadUrl = buildDownloadUrl({ videoUrl: videoUrl, audioUrl: audioUrl });
     const media = await Media.create({
       title: title, description: description, type: type, genre: genre,
       thumbnail: thumbnail || undefined, banner: banner || undefined,
       videoUrl: videoUrl || undefined, audioUrl: audioUrl || undefined,
+      downloadUrl: downloadUrl || undefined,
       creatorId: creator._id, uploadedBy: req.user.id, status: "published"
     });
     return res.status(201).json(media);

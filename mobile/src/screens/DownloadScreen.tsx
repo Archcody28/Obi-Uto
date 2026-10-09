@@ -24,7 +24,12 @@ import {
 import {
   cancelDownload,
   hasActiveDownload,
+  startDownload,
 } from "../services/downloadService";
+
+import {
+  verifyLocalFile,
+} from "../services/localMediaFile";
 
 import * as FileSystem
   from "expo-file-system/legacy";
@@ -35,6 +40,12 @@ import { AppTheme } from "../constants/theme";
 const imageFor = (item) =>
   item?.thumbnail || item?.banner || null;
 
+// States shown on a row:
+// - completed        -> "Available offline" (file verified on load)
+// - downloading      -> live byte progress
+// - failed, retryable-> honest error (downloadable representation exists)
+// - failed, unavail. -> "Unavailable offline" (streaming-only media)
+// - cancelled        -> cancelled, retry offered
 const statusLabel = (item) => {
   switch (item?.status) {
     case "downloading":
@@ -42,6 +53,9 @@ const statusLabel = (item) => {
     case "completed":
       return "Available offline";
     case "failed":
+      if (item?.downloadable === false) {
+        return `Unavailable offline — ${item?.error || "no downloadable file"}`;
+      }
       return item?.error || "Download failed";
     case "cancelled":
       return "Cancelled";
@@ -90,21 +104,47 @@ export default function DownloadScreen() {
       });
     };
 
-  const handleRetryHint =
-    (item) => {
-      router.push({
-        pathname: "/player",
-        params: {
-          mediaId: item.mediaId || item.id,
-          title: item.title,
-          videoUrl: item.videoUrl,
-        },
+  const handleRetry =
+    async (item) => {
+      if (!item || hasActiveDownload(item.id)) {
+        return;
+      }
+
+      // Real retry: re-run the full flow using the stored representation
+      // (no navigation required); progress/failure render on this row.
+      await startDownload({
+        id: item.id,
+        mediaId: item.mediaId || item.id,
+        title: item.title,
+        thumbnail: item.thumbnail || null,
+        banner: item.banner || null,
+        downloadUrl: item.downloadUrl || null,
+        videoUrl: item.videoUrl || null,
       });
     };
 
   const openItem =
-    (item) => {
+    async (item) => {
       if (item?.status !== "completed" || !item?.uri) {
+        return;
+      }
+
+      // Confirm the file really exists before promising offline playback.
+      const check = await verifyLocalFile(item.uri);
+
+      if (!check.exists) {
+        await updateDownload(item.id, {
+          status: "failed",
+          uri: null,
+          progress: 0,
+          error: "Downloaded file is no longer on this device.",
+        });
+
+        Alert.alert(
+          "File missing",
+          "The downloaded file is no longer on this device. Tap Retry to save it again."
+        );
+
         return;
       }
 
@@ -287,11 +327,12 @@ export default function DownloadScreen() {
                 )}
 
                 {(item?.status === "failed" ||
-                  item?.status === "cancelled") && (
+                  item?.status === "cancelled") &&
+                  item?.downloadable !== false && (
                   <TouchableOpacity
                     style={styles.retryBtn}
                     onPress={() =>
-                      handleRetryHint(item)
+                      handleRetry(item)
                     }
                   >
                     <Text style={styles.deleteText}>

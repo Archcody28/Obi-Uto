@@ -46,14 +46,16 @@ import {
 } from "../store/playerStore";
 
 import {
-  downloadVideo,
+  startDownload,
   cancelDownload,
   hasActiveDownload,
-  isOfflineCompatible,
 } from "../services/downloadService";
 
 import {
-  authorizeDownload,
+  verifyLocalFile,
+} from "../services/localMediaFile";
+
+import {
   saveProgress as saveProgressApi,
   getProgress,
 } from "../api/watchApi";
@@ -81,6 +83,12 @@ export default function PlayerScreen() {
       ? params.videoUrl[0]
       : params.videoUrl;
 
+  // Explicit downloadable single-file representation from the API contract
+  // (see Media.downloadUrl); falls back to fetched media details below.
+  const downloadUrlParam = Array.isArray(params.downloadUrl)
+    ? params.downloadUrl[0]
+    : params.downloadUrl;
+
   const localUri =
     Array.isArray(
       params.localUri
@@ -88,16 +96,45 @@ export default function PlayerScreen() {
       ? params.localUri[0]
       : params.localUri;
 
-  const videoSource =
-    localUri ||
-    onlineVideoUrl;
-
   const mediaId =
     Array.isArray(
       params.mediaId
     )
       ? params.mediaId[0]
       : params.mediaId;
+
+  /**
+   * Offline-first source: when a completed download for THIS media already
+   * exists on disk, start playback from the local file — no network needed
+   * to start. The pin is computed once per mediaId so a download completing
+   * mid-playback never restarts the video; re-entering the player picks the
+   * file up. A pin whose file has vanished is cleared (recovered below).
+   */
+  const offlinePinRef = useRef<{ id: string | null; uri: string | null }>({
+    id: null,
+    uri: null,
+  });
+
+  if (offlinePinRef.current.id !== (mediaId || null)) {
+    const stored = mediaId
+      ? useDownloadStore
+          .getState()
+          .downloads.find(
+            (item: any) =>
+              item.id === mediaId && item.status === "completed"
+          )
+      : undefined;
+
+    offlinePinRef.current = {
+      id: mediaId || null,
+      uri: stored?.uri || null,
+    };
+  }
+
+  const videoSource =
+    localUri ||
+    offlinePinRef.current.uri ||
+    onlineVideoUrl;
 
   const title =
     Array.isArray(
@@ -148,10 +185,10 @@ export default function PlayerScreen() {
         state.addFavorite
     );
 
-  const addDownload =
+  const loadDownloads =
     useDownloadStore(
       (state) =>
-        state.addDownload
+        state.loadDownloads
     );
 
   const updateDownload =
@@ -204,6 +241,9 @@ export default function PlayerScreen() {
     setCountdown,
   ] = useState(5);
 
+  /** Re-render trigger when the offline pin changes (adopted/cleared). */
+  const [, setOfflinePinEpoch] = useState(0);
+
   const player =
     useVideoPlayer(
       videoSource || null,
@@ -223,6 +263,88 @@ export default function PlayerScreen() {
       mountedRef.current = false;
     };
   }, []);
+
+  /**
+   * Make sure download state (and file verification) has been loaded, so
+   * the offline pin and the Download button reflect reality even when the
+   * player is the first screen opened in a session.
+   */
+  useEffect(() => {
+    if (useDownloadStore.getState().downloads.length === 0) {
+      loadDownloads().catch(console.error);
+    }
+  }, [loadDownloads]);
+
+  /**
+   * Offline pin lifecycle:
+   * - recover honestly when the pinned local file disappeared (never keep
+   *   a false completed state);
+   * - adopt a completed local file only while playback has not started yet,
+   *   so a download completing mid-video never restarts the stream.
+   */
+  useEffect(() => {
+    if (!mediaId) {
+      return;
+    }
+
+    const pinned = offlinePinRef.current;
+
+    if (pinned.id === mediaId && pinned.uri) {
+      let alive = true;
+
+      verifyLocalFile(pinned.uri)
+        .then((check) => {
+          if (!alive || check.exists) {
+            return;
+          }
+
+          offlinePinRef.current = {
+            id: mediaId,
+            uri: null,
+          };
+          setOfflinePinEpoch((epoch) => epoch + 1);
+
+          useDownloadStore
+            .getState()
+            .updateDownload(mediaId, {
+              status: "failed",
+              uri: null,
+              progress: 0,
+              error: "Downloaded file is no longer on this device.",
+            })
+            .catch(() => {});
+        })
+        .catch(() => {});
+
+      return () => {
+        alive = false;
+      };
+    }
+
+    if (
+      !pinned.uri &&
+      downloadEntry?.status === "completed" &&
+      downloadEntry?.uri
+    ) {
+      let played = 0;
+
+      try {
+        played = player?.currentTime || 0;
+      } catch {
+        played = 0;
+      }
+
+      if (played > 0.5 || progressRef.current > 0.5) {
+        return;
+      }
+
+      offlinePinRef.current = {
+        id: mediaId,
+        uri: downloadEntry.uri,
+      };
+      setOfflinePinEpoch((epoch) => epoch + 1);
+    }
+  }, [mediaId, downloadEntry, player]);
 
   /**
    * Load saved progress
@@ -572,9 +694,7 @@ export default function PlayerScreen() {
   const handleDownload =
     async () => {
       try {
-        if (
-          !mediaId
-        ) {
+        if (!mediaId) {
           Alert.alert(
             "Error",
             "Media ID missing"
@@ -583,138 +703,13 @@ export default function PlayerScreen() {
           return;
         }
 
-        if (!onlineVideoUrl) {
-          await addDownload({
-            id: mediaId,
-            mediaId,
-            title: title || "Untitled",
-            thumbnail:
-              downloadArt?.thumbnail || null,
-            banner: downloadArt?.banner || null,
-            videoUrl: null,
-            uri: null,
-            status: "failed",
-            progress: 0,
-            error: "No playable file for this title yet",
-          });
-
-          Alert.alert(
-            "Error",
-            "No playable file for this title yet"
-          );
-
-          return;
-        }
-
-        if (!isOfflineCompatible(onlineVideoUrl)) {
-          await addDownload({
-            id: mediaId,
-            mediaId,
-            title: title || "Untitled",
-            thumbnail:
-              downloadArt?.thumbnail || null,
-            banner: downloadArt?.banner || null,
-            videoUrl: onlineVideoUrl,
-            uri: null,
-            status: "failed",
-            progress: 0,
-            error:
-              "This title uses a streaming format that cannot be saved offline yet. An MP4 file is required.",
-          });
-
-          Alert.alert(
-            "Not downloadable",
-            "This title uses a streaming format that cannot be saved offline yet."
-          );
-
-          return;
-        }
-
-        const auth = await authorizeDownload(
-          mediaId
-        );
-
-        if (auth && auth.allowed === false) {
-          await addDownload({
-            id: mediaId,
-            mediaId,
-            title: title || "Untitled",
-            thumbnail:
-              downloadArt?.thumbnail || null,
-            banner: downloadArt?.banner || null,
-            videoUrl: onlineVideoUrl,
-            uri: null,
-            status: "failed",
-            progress: 0,
-            error: auth.message || "Download not allowed",
-          });
-
-          Alert.alert(
-            "Not allowed",
-            auth.message || "Download not allowed"
-          );
-
-          return;
-        }
-
-        // Active download -> refresh guard; duplicate taps are ignored.
+        // While a transfer is running, the button acts as Cancel.
         if (
           downloadEntry?.status === "downloading" ||
           hasActiveDownload(mediaId)
         ) {
-          return;
-        }
+          await cancelDownload(mediaId);
 
-        // Immediately show downloading state before the file work starts.
-        await addDownload({
-          id: mediaId,
-          mediaId,
-          title: title || "Untitled",
-          thumbnail:
-            downloadArt?.thumbnail || null,
-          banner: downloadArt?.banner || null,
-          videoUrl: onlineVideoUrl,
-          uri: null,
-          status: "downloading",
-          progress: 0,
-          error: null,
-        });
-
-        const result =
-          await downloadVideo(
-            onlineVideoUrl,
-            `${mediaId}.mp4`,
-            (p) => {
-              updateDownload(mediaId, {
-                progress: p,
-              });
-            },
-            mediaId
-          );
-
-        await updateDownload(mediaId, {
-          status: "completed",
-          progress: 1,
-          uri: result.uri,
-          error: null,
-        });
-
-        Alert.alert(
-          "Download Complete",
-          `${title || "Video"} downloaded successfully!`
-        );
-      } catch (err: any) {
-        console.log(
-          err
-        );
-
-        const message =
-          err?.response?.data?.message ||
-          err?.message ||
-          "Unable to download";
-
-        // Cancellation surfaces as a cancelled state, not a failure.
-        if (/cancel/i.test(message) && mediaId) {
           await updateDownload(mediaId, {
             status: "cancelled",
             progress: 0,
@@ -724,16 +719,58 @@ export default function PlayerScreen() {
           return;
         }
 
-        if (mediaId) {
-          await updateDownload(mediaId, {
-            status: "failed",
-            error: message,
-          });
+        // Full flow: duplicate protection -> honest unavailable state ->
+        // immediate downloading state -> authorization -> real byte
+        // progress -> validated completion (never a false "completed").
+        const result = await startDownload({
+          id: mediaId,
+          mediaId,
+          title: title || "Untitled",
+          thumbnail:
+            downloadArt?.thumbnail || null,
+          banner: downloadArt?.banner || null,
+          downloadUrl:
+            downloadUrlParam ||
+            downloadArt?.downloadUrl ||
+            null,
+          videoUrl:
+            onlineVideoUrl ||
+            downloadArt?.videoUrl ||
+            null,
+        });
+
+        if (result.status === "completed") {
+          if (result.message === "Already available offline") {
+            router.push("/(tabs)/downloads");
+            return;
+          }
+
+          Alert.alert(
+            "Download Complete",
+            `${title || "Video"} downloaded successfully!`
+          );
+
+          return;
         }
+
+        if (result.status === "failed") {
+          Alert.alert(
+            result.unavailable
+              ? "Not downloadable"
+              : "Download Failed",
+            result.message || "Unable to download"
+          );
+        }
+
+        // "cancelled" / "skipped": the UI already reflects the state.
+      } catch (err: any) {
+        console.log(
+          err
+        );
 
         Alert.alert(
           "Download Failed",
-          message
+          err?.message || "Unable to download"
         );
       }
     };

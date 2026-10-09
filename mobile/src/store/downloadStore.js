@@ -1,21 +1,74 @@
 import { create } from "zustand";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { verifyLocalFile } from "../services/localMediaFile";
+
 const STORAGE_KEY =
   "offline-downloads";
 
 // Lifecycle: idle -> downloading -> completed | failed | cancelled.
 // Only completed items persist across restarts; in-progress items are
 // re-marked as failed on load so they never falsely appear completed.
+// Completed items are additionally verified against the filesystem: a
+// "completed" row whose local file is gone or empty is recovered to a
+// failed state with an honest error instead of a false offline promise.
 
-const sanitizeLoaded = (list) =>
-  (Array.isArray(list) ? list : [])
-    .filter((item) => item && item.id)
-    .map((item) =>
-      item.status === "completed"
-        ? item
-        : { ...item, status: "failed", progress: 0 }
-    );
+const sanitizeItem = async (item) => {
+  if (!item || !item.id) {
+    return null;
+  }
+
+  if (item.status === "completed") {
+    const check = await verifyLocalFile(item.uri);
+
+    if (check.exists) {
+      return item;
+    }
+
+    return {
+      ...item,
+      status: "failed",
+      uri: null,
+      progress: 0,
+      error: "Downloaded file is no longer on this device.",
+    };
+  }
+
+  // Never rehydrate an in-progress transfer as if it were real state.
+  if (item.status === "downloading") {
+    return {
+      ...item,
+      status: "failed",
+      progress: 0,
+      error:
+        item.error || "Download was interrupted before it finished.",
+    };
+  }
+
+  if (item.status === "cancelled") {
+    return { ...item, progress: 0, error: null };
+  }
+
+  return { ...item, progress: 0 };
+};
+
+const sanitizeLoaded = async (list) => {
+  const items = Array.isArray(list) ? list : [];
+  const cleaned = await Promise.all(items.map(sanitizeItem));
+  return cleaned.filter(Boolean);
+};
+
+// Rows persist across restarts (including failed/unavailable rows so the
+// Downloads screen can keep distinguishing states and allow retry), but
+// `sanitizeLoaded` downgrades anything that was mid-flight to failed — a
+// failed or incomplete transfer is never rehydrated as completed.
+const persistList = async (downloads) => {
+  await AsyncStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(downloads)
+  );
+};
+
 
 export const useDownloadStore =
   create((set, get) => ({
@@ -29,20 +82,35 @@ export const useDownloadStore =
               STORAGE_KEY
             );
 
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            const cleaned = sanitizeLoaded(parsed);
+          const cleaned = await sanitizeLoaded(
+            saved ? JSON.parse(saved) : []
+          );
 
-            set({
-              downloads: cleaned,
-            });
+          // Keep rows for transfers that are running right now so a reload
+          // never wipes an active download from the UI.
+          const active = get().downloads.filter(
+            (item) => item.status === "downloading"
+          );
 
-            // Rewrite storage so stale in-progress entries never persist.
-            await AsyncStorage.setItem(
-              STORAGE_KEY,
-              JSON.stringify(cleaned)
-            );
-          }
+          const merged = [
+            ...cleaned.map((item) => {
+              const running = active.find(
+                (entry) => entry.id === item.id
+              );
+              return running || item;
+            }),
+            ...active.filter(
+              (entry) =>
+                !cleaned.some((item) => item.id === entry.id)
+            ),
+          ];
+
+          set({
+            downloads: merged,
+          });
+
+          // Rewrite storage so stale in-progress entries never persist.
+          await persistList(merged);
         } catch (err) {
           console.log(
             "Load downloads error:",
@@ -72,6 +140,7 @@ export const useDownloadStore =
           thumbnail:
             download.thumbnail || null,
           banner: download.banner || null,
+          downloadUrl: download.downloadUrl || null,
           videoUrl: download.videoUrl || null,
           uri: download.uri || null,
           status: download.status || "downloading",
@@ -80,6 +149,9 @@ export const useDownloadStore =
               ? download.progress
               : 0,
           error: download.error || null,
+          // false when the title genuinely has no downloadable file
+          // (streaming-only media) so the UI can show "unavailable".
+          downloadable: download.downloadable !== false,
           updatedAt: Date.now(),
         };
 
@@ -94,18 +166,10 @@ export const useDownloadStore =
             updated,
         });
 
-        // Only completed downloads persist; active/failed entries stay
-        // in memory so restarts never show false completions.
-        const persistable = updated.filter(
-          (item) => item.status === "completed"
-        );
-
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify(
-            persistable
-          )
-        );
+        // Persist every row (failed/unavailable rows must stay visible and
+        // retryable after a restart); `sanitizeLoaded` downgrades anything
+        // that was mid-flight so restarts never show false completions.
+        await persistList(updated);
       },
 
     updateDownload:
@@ -137,16 +201,19 @@ export const useDownloadStore =
             updated,
         });
 
-        const persistable = updated.filter(
-          (item) => item.status === "completed"
-        );
+        // Progress-only ticks skip disk writes (they fire many times per
+        // second during a transfer); any status/content change persists.
+        const keys = Object.keys(next);
+        const progressOnly =
+          typeof patch === "number" ||
+          (keys.length > 0 &&
+            keys.every(
+              (key) => key === "progress" || key === "updatedAt"
+            ));
 
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify(
-            persistable
-          )
-        );
+        if (!progressOnly) {
+          await persistList(updated);
+        }
       },
 
     removeDownload:

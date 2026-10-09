@@ -225,6 +225,8 @@ export default function DetailsScreen() {
         mediaId: item._id,
         videoUrl:
           item.videoUrl,
+        downloadUrl:
+          item.downloadUrl || "",
         title:
           item.seriesInfo
             ?.episodeTitle ||

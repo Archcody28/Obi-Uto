@@ -1,4 +1,5 @@
 const uploadToCloudinary = require("../utils/uploadToCloudinary");
+const { normalizeDownloadUrl } = require("../utils/mediaDownload");
 exports.uploadFile = async function (req, res) {
   try {
     if (!req.user) return res.status(401).json({ error: "Authentication required." });
@@ -18,7 +19,15 @@ exports.uploadFile = async function (req, res) {
       return res.status(502).json({ error: "Upload storage failed. Please retry." });
     }
     if (!result || !result.secure_url) return res.status(502).json({ error: "Upload storage failed. Please retry." });
-    return res.json({ url: result.secure_url, publicId: result.public_id, resourceType: result.resource_type || null });
+    // `downloadUrl` is the explicit downloadable file representation of the
+    // stored asset (MP4 delivery for Cloudinary-hosted video), or null when
+    // the upload has no single-file representation.
+    return res.json({
+      url: result.secure_url,
+      publicId: result.public_id,
+      resourceType: result.resource_type || null,
+      downloadUrl: normalizeDownloadUrl(result.secure_url),
+    });
   } catch (err) {
     if (err && err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: "File exceeds the 500MB server limit." });
     return res.status(500).json({ error: (err && err.message) || "Upload failed." });
