@@ -1,5 +1,13 @@
-const express =
-  require("express");
+"use strict";
+/*
+ * Phase 29 — canonical live-stream router.
+ *
+ * Public:  GET /live, /discover, /:id  (never expose stream keys)
+ * Owner:   POST /, POST /schedule, PUT /start/:id, PUT /end/:id,
+ *          PATCH /:id, GET /mine, GET /ingest/:id  (all authenticated and
+ *          ownership-verified inside the controller).
+ */
+const express = require("express");
 
 const {
   createStream,
@@ -8,45 +16,31 @@ const {
   endStream,
   scheduleStream,
   getDiscovery,
-} = require(
-  "../controllers/liveStreamController"
-);
+  getStream,
+  getMyStreams,
+  getIngestInfo,
+  updateStream,
+} = require("../controllers/liveStreamController");
 
-const router =
-  express.Router();
 const authMiddleware = require("../middleware/authMiddleware");
 
-router.post(
-  "/",
-  authMiddleware,
-  createStream
-);
+const router = express.Router();
 
-router.get(
-  "/live",
-  getLiveStreams
-);
+/* Public discovery/list (no auth required, no secrets returned). */
+router.get("/live", getLiveStreams);
+router.get("/discover", getDiscovery);
 
-router.put(
-  "/start/:id",
-  authMiddleware,
-  startStream
-);
+/* Authenticated creator endpoints (ownership verified per request). */
+router.get("/mine", authMiddleware, getMyStreams);
+router.get("/ingest/:id", authMiddleware, getIngestInfo);
+router.post("/", authMiddleware, createStream);
+router.post("/schedule", authMiddleware, scheduleStream);
+router.put("/start/:id", authMiddleware, startStream);
+router.put("/end/:id", authMiddleware, endStream);
+router.patch("/:id", authMiddleware, updateStream);
 
-router.put(
-  "/end/:id",
-  authMiddleware,
-  endStream
-);
+/* Public single-stream view. Must stay last so it cannot shadow the
+ * literal routes above. */
+router.get("/:id", getStream);
 
-router.post(
-  "/schedule",
-  authMiddleware,
-  scheduleStream
-);
-router.get(
-"/discover",
-getDiscovery
-);
-module.exports =
-  router;
+module.exports = router;

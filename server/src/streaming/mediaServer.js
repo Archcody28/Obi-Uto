@@ -1,46 +1,64 @@
-const uploadRecordedVideo =
-  require("../utils/uploadRecordedVideo");
-
-const path =
-  require("path");
-const Media =
-  require("../models/Media");
-const NodeMediaServer =
-  require("node-media-server");
-
-const LiveStream =
-  require("../models/LiveStream");
-
+"use strict";
 /*
-  Resolve the public media base URL once at startup.
+ * Phase 29 — canonical live media server (RTMP ingest -> HLS playback).
+ *
+ * Architecture (unchanged, made reliable):
+ *   OBS/RTMP encoder --RTMP--> NodeMediaServer --FFmpeg--> HLS (m3u8)
+ *
+ * The phone cannot broadcast directly; creators publish with an external
+ * RTMP encoder using the server URL + stream key from the Live Studio.
+ */
+const path = require("path");
 
-  Production must provide MEDIA_BASE_URL via the environment so playback URLs
-  are never silently built from a developer's LAN address. Only development
-  keeps a local fallback.
-*/
-function resolveMediaBaseUrl() {
-  const configured = (process.env.MEDIA_BASE_URL || "").trim();
+const mongoose = require("mongoose");
+const NodeMediaServer = require("node-media-server");
 
-  if (configured) {
-    return configured.replace(/\/+$/, "");
-  }
+const Media = require("../models/Media");
+const LiveStream = require("../models/LiveStream");
+const uploadRecordedVideo = require("../utils/uploadRecordedVideo");
+const { finalizeRecording } = require("./recordingProcessor");
+const { getIngestInfo } = require("./streamConfig");
 
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "FATAL: MEDIA_BASE_URL must be set in production and must point to the public media server URL."
-    );
-  }
+const ingest = getIngestInfo();
 
-  // Development-only fallback for local streaming.
-  return "http://192.168.42.43:8000";
+if (!ingest.mediaBaseUrl) {
+  throw new Error(
+    "FATAL: MEDIA_BASE_URL must be set in production and must point to the public media server URL."
+  );
 }
 
-const mediaBaseUrl =
-  resolveMediaBaseUrl();
+if (!ingest.ffmpegReady) {
+  console.warn(
+    "[live] WARNING: FFmpeg not available — RTMP ingest will accept broadcasts but HLS " +
+      "playback and recordings are disabled. Install FFmpeg and set FFMPEG_PATH."
+  );
+}
+
+for (const warning of ingest.warnings) {
+  if (!warning.startsWith("FFmpeg")) console.warn(`[live] ${warning}`);
+}
+
+const mediaRoot =
+  (process.env.MEDIA_ROOT || path.join(process.cwd(), "media"));
+
+const trans = ingest.ffmpegPath
+  ? {
+      ffmpeg: ingest.ffmpegPath,
+      tasks: [
+        {
+          app: "live",
+          hls: true,
+          hlsFlags: "[hls_time=2:hls_list_size=5:hls_flags=delete_segments]",
+          mp4: true,
+          mp4Flags: "[movflags=faststart]",
+        },
+      ],
+    }
+  : undefined;
 
 const config = {
   rtmp: {
-    port: 1935,
+    port: Number(process.env.RTMP_PORT) || 1935,
     chunk_size: 60000,
     gop_cache: true,
     ping: 30,
@@ -48,153 +66,145 @@ const config = {
   },
 
   http: {
-    port: 8000,
-    mediaroot: "./media",
-    allow_origin: process.env.NODE_ENV === "production" ? (process.env.ALLOWED_ORIGINS || "").split(",")[0] || "" : "*",
+    port: Number(process.env.MEDIA_PORT) || 8000,
+    mediaroot: mediaRoot,
+    allow_origin:
+      process.env.NODE_ENV === "production"
+        ? (process.env.ALLOWED_ORIGINS || "").split(",")[0] || "*"
+        : "*",
   },
 
-  trans: {
-    ffmpeg:
-      process.env.FFMPEG_PATH || "C:/ffmpeg/bin/ffmpeg.exe",
-
-   tasks: [
-  {
-    app: "live",
-
-    hls: true,
-
-    hlsFlags:
-      "[hls_time=2:hls_list_size=5:hls_flags=delete_segments]",
-
-    mp4: true,
-
-    mp4Flags:
-      "[movflags=faststart]",
-  },
-],
-  },
+  ...(trans ? { trans } : {}),
 };
 
-const nms =
-  new NodeMediaServer(config);
+const nms = new NodeMediaServer(config);
 
-/*
- Stream Started
-*/
-
-nms.on(
-  "postPublish",
-  async (
-    id,
-    streamPath
-  ) => {
-    try {
-      const streamKey =
-        streamPath.split("/")[2];
-
-      await LiveStream.findOneAndUpdate(
-        {
-          streamKey,
-        },
-        {
-          isLive: true,
-
-          startedAt:
-            new Date(),
-
-          playbackUrl: `${mediaBaseUrl}/live/${streamKey}/index.m3u8`,
-        }
-      );
-
-      console.log(
-        "LIVE:",
-        streamKey
-      );
-    } catch (err) {
-      console.log(err);
-    }
-  }
-);
-
-/*
- Stream Ended
-*/
-
-nms.on(
-  "donePublish",
-  async (
-    id,
-    streamPath
-  ) => {
-    try {
-      const streamKey =
-        streamPath.split("/")[2];
-
-      await LiveStream.findOneAndUpdate(
-        {
-          streamKey,
-        },
-        {
-          isLive: false,
-
-          endedAt:
-            new Date(),
-        }
-      );
-
-      console.log(
-        "ENDED:",
-        streamKey
-      );
-      const stream =
-  await LiveStream.findOne({
-    streamKey,
-  });
-
-if (stream) {
-  const localFile =
-  path.join(
-    process.cwd(),
-    "media",
-    "live",
-    `${streamKey}.mp4`
-  );
-
-const uploaded =
-  await uploadRecordedVideo(
-    localFile
-  );
-
-await Media.create({
-  title:
-    stream.title,
-
-  description:
-    stream.description,
-
-  thumbnail:
-    stream.thumbnail,
-
-  category:
-    stream.category,
-
-  creator:
-    stream.creatorId,
-
-  type:
-    "video",
-
-  source:
-    uploaded.secure_url,
-});
+function streamKeyFromPath(streamPath) {
+  // Stream path looks like "/live/<streamKey>"
+  const parts = String(streamPath || "").split("/").filter(Boolean);
+  return parts.length >= 2 ? parts[1] : null;
 }
-    } catch (err) {
-      console.log(err);
+
+/* Stream Started (authoritative "live" signal: a publisher is attached). */
+nms.on("postPublish", async (_id, streamPath) => {
+  const streamKey = streamKeyFromPath(streamPath);
+  if (!streamKey) return;
+
+  try {
+    const stream = await LiveStream.findOne({ streamKey });
+    if (!stream) {
+      console.warn(`[live] publish attempt with unknown stream key; rejected (no matching stream)`);
+      return;
     }
+
+    await LiveStream.updateOne(
+      { _id: stream._id },
+      {
+        $set: {
+          isLive: true,
+          startedAt: stream.startedAt || new Date(),
+          endedAt: null,
+          playbackUrl: `${ingest.mediaBaseUrl}/live/${streamKey}/index.m3u8`,
+        },
+      }
+    );
+
+    console.log(`[live] LIVE: ${stream.title} (${stream._id})`);
+  } catch (err) {
+    console.error("[live] postPublish error:", err.message);
   }
-  
-);
+});
 
+/* Stream Ended */
+nms.on("donePublish", async (_id, streamPath) => {
+  const streamKey = streamKeyFromPath(streamPath);
+  if (!streamKey) return;
 
-module.exports =
-  nms;
+  try {
+    const stream = await LiveStream.findOneAndUpdate(
+      { streamKey },
+      {
+        $set: {
+          isLive: false,
+          endedAt: new Date(),
+          viewers: 0,
+        },
+      },
+      { new: true }
+    );
+
+    if (!stream) return;
+
+    console.log(`[live] ENDED: ${stream.title} (${stream._id})`);
+
+    // Tell everyone in the chat room the broadcast stopped.
+    try {
+      const { notifyStreamEnded } = require("../socket");
+      notifyStreamEnded(String(stream._id));
+    } catch (_err) {
+      /* socket layer unavailable (e.g. tests) — safe to skip */
+    }
+
+    // Archive the recording. Failures here must NOT affect stream cleanup.
+    await finalizeRecording({
+      streamKey,
+      stream,
+      mediaRoot,
+      uploadRecordedVideo,
+      Media,
+    });
+  } catch (err) {
+    console.error("[live] donePublish error:", err.message);
+  }
+});
+
+/*
+ * Reconcile stale sessions: any stream still flagged live when the process
+ * (and therefore the media server) starts cannot actually have a publisher —
+ * the previous process died or the stream was left open. Mark them ended so
+ * discovery and viewers never see ghost live streams.
+ */
+async function reconcileStaleLiveStreams() {
+  const result = await LiveStream.updateMany(
+    { isLive: true },
+    {
+      $set: {
+        isLive: false,
+        endedAt: new Date(),
+        viewers: 0,
+      },
+    }
+  );
+
+  if (result.modifiedCount > 0) {
+    console.warn(
+      `[live] reconciled ${result.modifiedCount} stale live session(s) after restart`
+    );
+  }
+
+  return result.modifiedCount;
+}
+
+/* Wait (patiently) for MongoDB before reconciling; index.js connects async. */
+function scheduleReconciliation(attemptsLeft = 30, delayMs = 2000) {
+  setTimeout(() => {
+    if (mongoose.connection.readyState === 1) {
+      reconcileStaleLiveStreams().catch((err) =>
+        console.error("[live] stale reconciliation failed:", err.message)
+      );
+      return;
+    }
+
+    if (attemptsLeft <= 1) {
+      console.warn("[live] skipping stale-session reconciliation: database never connected");
+      return;
+    }
+
+    scheduleReconciliation(attemptsLeft - 1, delayMs);
+  }, delayMs);
+}
+
+scheduleReconciliation();
+
+module.exports = nms;
+module.exports.reconcileStaleLiveStreams = reconcileStaleLiveStreams;

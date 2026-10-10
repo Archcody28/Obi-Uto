@@ -73,9 +73,15 @@ export default function LiveChatScreen({
     setBannedNotice,
   ] = useState("");
 
+  const [
+    streamEndedNotice,
+    setStreamEndedNotice,
+  ] = useState("");
+
   useEffect(() => {
     setChatLoading(true);
     setChatError("");
+    setStreamEndedNotice("");
 
     getMessages(streamId)
       .then((data) => {
@@ -115,7 +121,18 @@ export default function LiveChatScreen({
     socket.on(
       "viewer-count",
       (count) => {
-        setViewers(count);
+        // Guard against malformed payloads; server never sends negatives.
+        const parsed = Math.max(0, Number(count) || 0);
+        setViewers(parsed);
+      }
+    );
+
+    socket.on(
+      "stream-ended",
+      () => {
+        setStreamEndedNotice(
+          "The broadcast has ended."
+        );
       }
     );
 
@@ -261,6 +278,10 @@ export default function LiveChatScreen({
 
       socket.off(
         "user-banned"
+      );
+
+      socket.off(
+        "stream-ended"
       );
     };
   }, [streamId]);
@@ -465,6 +486,12 @@ export default function LiveChatScreen({
       {!!bannedNotice && (
         <Text style={styles.notice}>
           {bannedNotice}
+        </Text>
+      )}
+
+      {!!streamEndedNotice && (
+        <Text style={styles.notice}>
+          {streamEndedNotice}
         </Text>
       )}
 

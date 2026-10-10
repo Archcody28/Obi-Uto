@@ -62,6 +62,16 @@ import {
 } from "../api/watchApi";
 
 import {
+  getStream as getLiveStreamApi,
+} from "../api/liveStreamApi";
+
+import {
+  followCreator,
+  unfollowCreator,
+  getFollowStatus,
+} from "../api/followApi";
+
+import {
   addFavorite as addFavoriteApi,
 } from "../api/favoriteApi";
 
@@ -167,6 +177,103 @@ export default function PlayerScreen() {
     )
       ? params.creatorId[0]
       : params.creatorId;
+
+  /*
+   * Phase 29 — live stream awareness.
+   * While watching live, poll the canonical stream endpoint for real status
+   * (waiting/live/ended), viewer count and creator identity. When the
+   * broadcast ends server-side we show an honest "ended" state instead of a
+   * forever-buffering player.
+   */
+  const [liveInfo, setLiveInfo] = useState<any>(null);
+  const [liveEnded, setLiveEnded] = useState(false);
+  const [liveWaiting, setLiveWaiting] = useState(false);
+  const [following, setFollowing] = useState<boolean | null>(null);
+  const [followBusy, setFollowBusy] = useState(false);
+
+  useEffect(() => {
+    if (!isLive || !streamId) {
+      return;
+    }
+
+    let alive = true;
+
+    const refresh = async () => {
+      try {
+        const info = await getLiveStreamApi(streamId);
+        if (!alive || !mountedRef.current) return;
+
+        setLiveInfo(info);
+        setLiveEnded(!info?.isLive && !!info?.endedAt);
+        setLiveWaiting(!info?.isLive && !info?.endedAt);
+      } catch (err) {
+        // A live stream that 404s is treated as ended, not as a crash.
+        if (alive && mountedRef.current) {
+          setLiveEnded(true);
+        }
+      }
+    };
+
+    refresh();
+    const timer = setInterval(refresh, 8000);
+
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [isLive, streamId]);
+
+  /* Load follow state for the stream's creator. */
+  useEffect(() => {
+    const targetId =
+      liveInfo?.creatorId && typeof liveInfo.creatorId === "object"
+        ? liveInfo.creatorId._id
+        : liveInfo?.creatorId || creatorId;
+
+    if (!isLive || !targetId) {
+      return;
+    }
+
+    let alive = true;
+
+    getFollowStatus(targetId)
+      .then((data) => {
+        if (!alive || !mountedRef.current) return;
+        setFollowing(Boolean(data?.isFollowing ?? data?.following));
+      })
+      .catch(() => {});
+
+    return () => {
+      alive = false;
+    };
+  }, [isLive, creatorId, liveInfo?.creatorId]);
+
+  const toggleFollow = async () => {
+    const targetId =
+      liveInfo?.creatorId && typeof liveInfo.creatorId === "object"
+        ? liveInfo.creatorId._id
+        : liveInfo?.creatorId || creatorId;
+
+    if (!targetId || followBusy) return;
+
+    setFollowBusy(true);
+    try {
+      if (following) {
+        await unfollowCreator(targetId);
+        setFollowing(false);
+      } else {
+        await followCreator(targetId);
+        setFollowing(true);
+      }
+    } catch (err: any) {
+      Alert.alert(
+        "Follow failed",
+        err?.response?.data?.message || "Please try again."
+      );
+    } finally {
+      setFollowBusy(false);
+    }
+  };
 
   const setCurrentMedia =
     usePlayerStore(
@@ -858,6 +965,47 @@ export default function PlayerScreen() {
   };
 
   if (!videoSource) {
+    /*
+     * Live streams without a playback URL yet: the broadcast has not
+     * reached the media server. Show an honest waiting/ended state instead
+     * of a blank "Video not found" crash screen.
+     */
+    if (isLive) {
+      return (
+        <View style={styles.container}>
+          <View style={styles.liveStateBox}>
+            <Text style={styles.liveStateTitle}>
+              {liveEnded
+                ? "This live stream has ended"
+                : liveWaiting
+                  ? "The broadcast hasn't started yet"
+                  : "Connecting to live stream..."}
+            </Text>
+
+            <Text style={styles.liveStateText}>
+              {liveEnded
+                ? "Thanks for watching. Check out more live streams soon."
+                : liveWaiting
+                  ? "The creator is setting up. This screen will start playing automatically once the broadcast begins."
+                  : "If this takes too long, the stream may not have started broadcasting yet."}
+            </Text>
+          </View>
+
+          {streamId && (
+            <View style={styles.chatPanel}>
+              <LiveChatScreen
+                streamId={streamId}
+                stream={{
+                  _id: streamId,
+                  creatorId,
+                }}
+              />
+            </View>
+          )}
+        </View>
+      );
+    }
+
     return (
       <View
         style={
@@ -896,6 +1044,70 @@ export default function PlayerScreen() {
         nativeControls
         contentFit="contain"
       />
+
+      {isLive && (
+        <View style={styles.liveHeader}>
+          <View style={styles.liveHeaderMain}>
+            <View style={styles.liveBadgeRow}>
+              <View
+                style={[
+                  styles.liveBadge,
+                  liveEnded && styles.liveBadgeEnded,
+                ]}
+              >
+                <Text style={styles.liveBadgeText}>
+                  {liveEnded ? "ENDED" : "LIVE"}
+                </Text>
+              </View>
+
+              {!!liveInfo?.viewers && (
+                <Text style={styles.liveViewers}>
+                  {Math.max(0, Number(liveInfo.viewers) || 0)} watching
+                </Text>
+              )}
+            </View>
+
+            <Text style={styles.liveTitle} numberOfLines={2}>
+              {liveInfo?.title || title || "Live stream"}
+            </Text>
+
+            <Text style={styles.liveCreator} numberOfLines={1}>
+              {liveInfo?.creatorId && typeof liveInfo.creatorId === "object"
+                ? `${liveInfo.creatorId.displayName || "Creator"}${liveInfo.creatorId.verified ? " ✓" : ""}`
+                : "Creator"}
+            </Text>
+          </View>
+
+          {following !== null && !liveEnded && (
+            <TouchableOpacity
+              style={[
+                styles.followBtn,
+                following && styles.followBtnActive,
+                followBusy && { opacity: 0.6 },
+              ]}
+              disabled={followBusy}
+              onPress={toggleFollow}
+            >
+              <Text
+                style={[
+                  styles.followText,
+                  following && styles.followTextActive,
+                ]}
+              >
+                {following ? "Following" : "Follow"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {isLive && liveEnded && (
+        <View style={styles.liveEndedBanner}>
+          <Text style={styles.liveEndedText}>
+            The broadcast has ended. Thanks for watching!
+          </Text>
+        </View>
+      )}
 
       {isLive && streamId && (
         <View style={styles.chatPanel}>
@@ -1093,6 +1305,122 @@ const styles =
     liveVideo: {
       height: 280,
       backgroundColor: "#000000",
+    },
+
+    liveStateBox: {
+      marginTop: 48,
+      marginHorizontal: 24,
+      padding: 20,
+      backgroundColor: AppTheme.colors.surface,
+      borderRadius: AppTheme.radius.md,
+      borderWidth: 1,
+      borderColor: AppTheme.colors.border,
+    },
+
+    liveStateTitle: {
+      color: AppTheme.colors.text,
+      fontSize: 18,
+      fontWeight: "900",
+      marginBottom: 8,
+    },
+
+    liveStateText: {
+      color: AppTheme.colors.textMuted,
+      lineHeight: 20,
+    },
+
+    liveHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      backgroundColor: AppTheme.colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: AppTheme.colors.border,
+    },
+
+    liveHeaderMain: {
+      flex: 1,
+      paddingRight: 12,
+    },
+
+    liveBadgeRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 6,
+    },
+
+    liveBadge: {
+      backgroundColor: AppTheme.colors.live,
+      borderRadius: AppTheme.radius.sm,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+
+    liveBadgeEnded: {
+      backgroundColor: AppTheme.colors.textSubtle,
+    },
+
+    liveBadgeText: {
+      color: "#FFFFFF",
+      fontSize: 11,
+      fontWeight: "900",
+    },
+
+    liveViewers: {
+      color: AppTheme.colors.textMuted,
+      fontSize: 12,
+      fontWeight: "700",
+      marginLeft: 10,
+    },
+
+    liveTitle: {
+      color: AppTheme.colors.text,
+      fontSize: 16,
+      fontWeight: "900",
+      lineHeight: 21,
+    },
+
+    liveCreator: {
+      color: AppTheme.colors.textMuted,
+      fontSize: 13,
+      marginTop: 2,
+    },
+
+    followBtn: {
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+      borderRadius: AppTheme.radius.sm,
+      backgroundColor: AppTheme.colors.accent,
+    },
+
+    followBtnActive: {
+      backgroundColor: AppTheme.colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: AppTheme.colors.border,
+    },
+
+    followText: {
+      color: AppTheme.colors.background,
+      fontWeight: "900",
+      fontSize: 13,
+    },
+
+    followTextActive: {
+      color: AppTheme.colors.text,
+    },
+
+    liveEndedBanner: {
+      backgroundColor: "rgba(242,85,85,0.12)",
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+    },
+
+    liveEndedText: {
+      color: AppTheme.colors.live,
+      textAlign: "center",
+      fontWeight: "800",
+      fontSize: 13,
     },
 
     chatPanel: {

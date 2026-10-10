@@ -1,136 +1,50 @@
-const LiveStream =
-  require("../models/LiveStream");
-
+"use strict";
 /*
-Schedule Stream
-*/
-exports.scheduleStream =
-  async (req, res) => {
-    try {
-      const stream =
-        await LiveStream.create({
-          creatorId:
-            req.user.id,
+ * Phase 29 — DEPRECATED legacy live controller.
+ *
+ * The old implementation used a `status` field that never existed on the
+ * LiveStream schema and skipped ownership checks entirely (any authenticated
+ * user could start/end any stream). It is now a thin adapter over the
+ * canonical live-stream subsystem so legacy /api/live clients keep working
+ * with correct authorization and without conflicting lifecycle semantics.
+ */
+const {
+  createStream,
+  getLiveStreams,
+  startStream,
+  endStream,
+  scheduleStream,
+  getDiscovery,
+} = require("./liveStreamController");
 
-          title:
-            req.body.title,
-
-          description:
-            req.body.description,
-
-          thumbnail:
-            req.body.thumbnail,
-
-          scheduledFor:
-            req.body.scheduledFor,
-        });
-
-      res.status(201).json(
-        stream
+let warned = false;
+function deprecationWarn(handler) {
+  return (req, res, next) => {
+    if (!warned) {
+      console.warn(
+        "[live] The /api/live router is deprecated. Use /api/live-streams instead."
       );
-    } catch (err) {
-      res.status(500).json({
-        message:
-          "Failed to schedule stream",
-      });
+      warned = true;
     }
+    return handler(req, res, next);
   };
+}
 
-/*
-Start Stream
-*/
-exports.startStream =
-  async (req, res) => {
-    try {
-      const stream =
-        await LiveStream.findByIdAndUpdate(
-          req.params.id,
-          {
-            status: "live",
+exports.scheduleStream = deprecationWarn(scheduleStream);
+exports.startStream = deprecationWarn(startStream);
+exports.endStream = deprecationWarn(endStream);
+exports.getLiveStreams = deprecationWarn(getLiveStreams);
 
-            startedAt:
-              new Date(),
-          },
-          {
-            new: true,
-          }
-        );
+/* Legacy shape: plain array of scheduled streams. */
+exports.getUpcomingStreams = deprecationWarn(async (req, res, next) => {
+  try {
+    const discoveryReq = { ...req, params: req.params };
+    const json = res.json.bind(res);
 
-      res.json(stream);
-    } catch (err) {
-      res.status(500).json({
-        message:
-          "Failed to start stream",
-      });
-    }
-  };
+    res.json = (payload) => json(payload && payload.upcoming ? payload.upcoming : payload);
 
-/*
-End Stream
-*/
-exports.endStream =
-  async (req, res) => {
-    try {
-      const stream =
-        await LiveStream.findByIdAndUpdate(
-          req.params.id,
-          {
-            status: "ended",
-
-            endedAt:
-              new Date(),
-          },
-          {
-            new: true,
-          }
-        );
-
-      res.json(stream);
-    } catch (err) {
-      res.status(500).json({
-        message:
-          "Failed to end stream",
-      });
-    }
-  };
-
-/*
-Upcoming Streams
-*/
-exports.getUpcomingStreams =
-  async (req, res) => {
-    const streams =
-      await LiveStream.find({
-        status:
-          "scheduled",
-      })
-        .populate(
-          "creatorId",
-          "displayName"
-        )
-        .sort({
-          scheduledFor: 1,
-        });
-
-    res.json(streams);
-  };
-
-/*
-Live Streams
-*/
-exports.getLiveStreams =
-  async (req, res) => {
-    const streams =
-      await LiveStream.find({
-        status: "live",
-      })
-        .populate(
-          "creatorId",
-          "displayName"
-        )
-        .sort({
-          startedAt: -1,
-        });
-
-    res.json(streams);
-  };
+    return getDiscovery(discoveryReq, res);
+  } catch (err) {
+    return next(err);
+  }
+});

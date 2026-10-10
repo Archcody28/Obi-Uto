@@ -18,7 +18,51 @@ const LiveMute =
 const LiveModerator =
   require("./models/LiveModerator");
 
-const viewers = {};
+const LiveStream =
+  require("./models/LiveStream");
+
+const {
+  ViewerRegistry,
+} = require("./streaming/viewerRegistry");
+
+/*
+ * Phase 29 — viewer counts are tracked per socket in a registry that can
+ * never go negative and never double-counts a reconnecting socket.
+ */
+const viewerRegistry =
+  new ViewerRegistry();
+
+let io = null;
+
+/* Persist the live viewer count so discovery cards show real numbers. */
+function persistViewerCount(streamId, count) {
+  const safeCount = Math.max(0, Number(count) || 0);
+
+  LiveStream.updateOne(
+    { _id: streamId },
+    { $set: { viewers: safeCount } }
+  ).catch((err) => {
+    console.warn(
+      `[live] failed to persist viewer count for ${streamId}: ${err.message}`
+    );
+  });
+}
+
+/*
+ * Called by the media server when a broadcast stops (donePublish) so every
+ * viewer immediately learns the stream ended instead of buffering forever.
+ */
+function notifyStreamEnded(streamId) {
+  if (!io || !streamId) return;
+
+  const id = String(streamId);
+
+  viewerRegistry.reset(id);
+
+  io.to(id).emit("stream-ended", {
+    streamId: id,
+  });
+}
 
 // Helper: check if user is moderator for a stream
 async function isModerator(streamId, userId) {
@@ -82,14 +126,21 @@ const initializeSocket =
             if (!streamId) return;
 
             socket.join(streamId);
-            
-            viewers[streamId] =
-              (viewers[streamId] || 0) + 1;
+
+            const { count, changed } =
+              viewerRegistry.join(
+                String(streamId),
+                socket.id
+              );
 
             io.to(streamId).emit(
               "viewer-count",
-              viewers[streamId]
+              count
             );
+
+            if (changed) {
+              persistViewerCount(streamId, count);
+            }
           }
         );
 
@@ -277,6 +328,7 @@ const initializeSocket =
           }
         );
 
+
         socket.on(
           "ban-user",
           async ({
@@ -346,6 +398,7 @@ const initializeSocket =
           }
         );
 
+
         socket.on(
           "leave-stream",
           ({ streamId }) => {
@@ -353,13 +406,19 @@ const initializeSocket =
 
             socket.leave(streamId);
 
-            if (viewers[streamId]) {
-              viewers[streamId]--;
+            const { count, changed } =
+              viewerRegistry.leave(
+                String(streamId),
+                socket.id
+              );
 
+            if (changed) {
               io.to(streamId).emit(
                 "viewer-count",
-                viewers[streamId]
+                count
               );
+
+              persistViewerCount(streamId, count);
             }
           }
         );
@@ -371,6 +430,22 @@ const initializeSocket =
               "Disconnected:",
               socket.id
             );
+
+            // Release every room this socket was counted in so viewers
+            // never leak after a drop/reconnect.
+            const affected =
+              viewerRegistry.disconnect(
+                socket.id
+              );
+
+            for (const [streamId, count] of affected) {
+              io.to(streamId).emit(
+                "viewer-count",
+                count
+              );
+
+              persistViewerCount(streamId, count);
+            }
           }
         );
       }
@@ -379,6 +454,7 @@ const initializeSocket =
 
 module.exports = {
   initializeSocket,
+  notifyStreamEnded,
   getIO: () => io,
 };
 
