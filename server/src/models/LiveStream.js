@@ -59,6 +59,23 @@ const liveStreamSchema =
         default: 0,
       },
 
+      /* Phase 30 — mobile publisher lifecycle (no secrets; safe for queries). */
+      publisherSource: {
+        type: String,
+        enum: ["unknown", "mobile", "external"],
+        default: "unknown",
+      },
+
+      publisherHeartbeatAt: {
+        type: Date,
+        default: null,
+      },
+
+      mobileSessionActive: {
+        type: Boolean,
+        default: false,
+      },
+
       notifyUsers: [
         {
           type:

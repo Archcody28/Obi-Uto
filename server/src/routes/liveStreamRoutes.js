@@ -20,6 +20,8 @@ const {
   getMyStreams,
   getIngestInfo,
   updateStream,
+  mobileSignal,
+  getOwnerStatus,
 } = require("../controllers/liveStreamController");
 
 const authMiddleware = require("../middleware/authMiddleware");
@@ -33,6 +35,8 @@ router.get("/discover", getDiscovery);
 /* Authenticated creator endpoints (ownership verified per request). */
 router.get("/mine", authMiddleware, getMyStreams);
 router.get("/ingest/:id", authMiddleware, getIngestInfo);
+router.get("/status/:id", authMiddleware, getOwnerStatus);
+router.post("/mobile-signal/:id", authMiddleware, mobileSignal);
 router.post("/", authMiddleware, createStream);
 router.post("/schedule", authMiddleware, scheduleStream);
 router.put("/start/:id", authMiddleware, startStream);

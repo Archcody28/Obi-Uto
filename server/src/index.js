@@ -32,6 +32,8 @@ require("./jobs/recommendationBatchJob");
 require("./jobs/notificationJob");
 const mediaServer =
   require("./streaming/mediaServer");
+const { startStaleSweep } = require("./streaming/staleSweep");
+startStaleSweep();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");

@@ -8,9 +8,21 @@
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.obiuuto.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Camera access is required to preview and broadcast your live stream.",
+        "NSMicrophoneUsageDescription": "Microphone access is required to broadcast audio with your live stream."
+      }
     },
     "android": {
+      "package": "com.obiuuto.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -35,7 +47,16 @@
           }
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-nodemediaclient",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera for live streaming",
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone for live streaming",
+          "recordAudioAndroid": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

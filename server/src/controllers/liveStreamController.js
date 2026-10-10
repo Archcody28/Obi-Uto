@@ -1,16 +1,20 @@
 "use strict";
 /*
- * Phase 29 — canonical live-stream controller.
+ * Phase 30 — canonical live-stream controller (mobile-first).
  *
- * Lifecycle: created (waiting) -> published via RTMP (live) -> ended.
+ * Lifecycle: created (waiting) -> mobile camera publishes via RTMP (live) -> ended.
  * - "isLive" is only ever set to true by real RTMP ingest (mediaServer
- *   postPublish). Creating or scheduling a stream never marks it live.
+ *   postPublish). Creating/scheduling/opening a stream never marks it live.
+ * - Mobile flow: create -> preview -> Start Live (native RTMP publish) ->
+ *   postPublish flips live -> heartbeat keeps the mobile session fresh ->
+ *   End Live (stop publish + PUT /end/:id).
  * - "ended" is authoritative once endedAt is set; a stream cannot go back
  *   to live without a new publisher attaching (postPublish allows restart).
+ * - Stale mobile sessions (heartbeat lost) are swept to ended so discovery
+ *   never shows ghost live streams.
  *
  * Privacy: streamKey is creator-only. Every public projection goes through
- * sanitizeStream()/sanitizeStreamDoc() which strips streamKey, notifyUsers
- * and other internal fields before the response leaves the server.
+ * sanitizeStream() which strips streamKey, notifyUsers and other internals.
  */
 const mongoose = require("mongoose");
 
@@ -440,6 +444,7 @@ exports.endStream = async (req, res) => {
           isScheduled: false,
           endedAt: new Date(),
           viewers: 0,
+          mobileSessionActive: false,
         },
       },
       { new: true }
@@ -456,3 +461,89 @@ exports.endStream = async (req, res) => {
 exports.sanitizeStream = sanitizeStream;
 exports.sanitizeStreams = sanitizeStreams;
 exports.CREATOR_PUBLIC_FIELDS = CREATOR_PUBLIC_FIELDS;
+
+/*
+ * Phase 30 — mobile publisher handshake.
+ * POST /api/live-streams/mobile-signal/:id (auth, owner-only)
+ * Body: { action: "preview" | "publishing" | "heartbeat" | "stopped" }
+ * Records the mobile session state WITHOUT marking live. Only real RTMP
+ * ingest (postPublish) may set isLive=true.
+ */
+const MOBILE_HEARTBEAT_TIMEOUT_MS = Number(process.env.MOBILE_PUBLISH_TIMEOUT_MS) || 45000;
+
+exports.mobileSignal = async (req, res) => {
+  try {
+    const loaded = await loadOwnedStream(req);
+    if (loaded.error) {
+      return sendError(res, loaded.error.status, loaded.error.message);
+    }
+    const action = String(req.body.action || "").trim().toLowerCase();
+    const allowed = ["preview", "publishing", "heartbeat", "stopped"];
+    if (!allowed.includes(action)) {
+      return sendError(res, 400, "Invalid action. Use preview, publishing, heartbeat or stopped.");
+    }
+    if (loaded.stream.endedAt && action !== "preview") {
+      return sendError(res, 409, "Stream has already ended");
+    }
+    const now = new Date();
+    const updates =
+      action === "stopped"
+        ? { mobileSessionActive: false, publisherSource: "mobile" }
+        : {
+            mobileSessionActive: true,
+            publisherSource: "mobile",
+            publisherHeartbeatAt: now,
+          };
+    const stream = await LiveStream.findByIdAndUpdate(
+      loaded.stream._id,
+      { $set: updates },
+      { new: true }
+    );
+    res.json({ success: true, live: Boolean(stream.isLive), stream: creatorStreamPayload(stream) });
+  } catch (err) {
+    console.error("mobileSignal error:", err.message);
+    sendError(res, 500, "Failed to record mobile signal");
+  }
+};
+
+/*
+ * Phase 30 — owner-only live confirmation poll.
+ * GET /api/live-streams/status/:id (auth, owner-only)
+ * Lets the creator app wait for real ingest: live=true only after postPublish.
+ */
+exports.getOwnerStatus = async (req, res) => {
+  try {
+    const loaded = await loadOwnedStream(req);
+    if (loaded.error) {
+      return sendError(res, loaded.error.status, loaded.error.message);
+    }
+    const fresh = await LiveStream.findById(loaded.stream._id);
+    res.json({ success: true, live: Boolean(fresh.isLive), stream: creatorStreamPayload(fresh) });
+  } catch (err) {
+    console.error("getOwnerStatus error:", err.message);
+    sendError(res, 500, "Failed to load stream status");
+  }
+};
+
+/* Phase 30 — stale mobile session recovery (sweeper + boot reconciliation). */
+async function sweepStaleMobileSessions(now = new Date()) {
+  const cutoff = new Date(now.getTime() - MOBILE_HEARTBEAT_TIMEOUT_MS);
+  const result = await LiveStream.updateMany(
+    {
+      isLive: true,
+      publisherSource: "mobile",
+      mobileSessionActive: true,
+      $or: [
+        { publisherHeartbeatAt: null },
+        { publisherHeartbeatAt: { $lt: cutoff } },
+      ],
+    },
+    {
+      $set: { isLive: false, endedAt: now, viewers: 0, mobileSessionActive: false },
+    }
+  );
+  return result.modifiedCount || 0;
+}
+
+exports.MOBILE_HEARTBEAT_TIMEOUT_MS = MOBILE_HEARTBEAT_TIMEOUT_MS;
+exports.sweepStaleMobileSessions = sweepStaleMobileSessions;

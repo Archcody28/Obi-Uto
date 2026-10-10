@@ -2,7 +2,10 @@ import client
   from "./client";
 
 /*
- * Phase 29 — live streaming API.
+ * Phase 30 — live streaming API (mobile-first, RTMP ingest stays backend-only).
+ * Technology: expo-nodemediaclient (NodePublisher) publishes the device
+ * camera straight to the existing NodeMediaServer ingest; the creator never
+ * sees a stream key. Requires a custom dev build (native module, no Expo Go).
  * Stream keys are returned ONLY by /mine and /ingest/:id, which require an
  * authenticated creator token. Public endpoints never expose keys.
  */
@@ -65,6 +68,33 @@ export const getStreamIngest =
     const res =
       await client.get(
         `/live-streams/ingest/${streamId}`
+      );
+
+    return res.data;
+  };
+
+/*
+ * Phase 30 — mobile publisher handshake. Records preview/publishing/
+ * heartbeat/stopped without ever marking the stream live (only real RTMP
+ * ingest via postPublish may set isLive=true).
+ */
+export const sendMobileSignal =
+  async (streamId, action) => {
+    const res =
+      await client.post(
+        `/live-streams/mobile-signal/${streamId}`,
+        { action }
+      );
+
+    return res.data;
+  };
+
+/* Owner-only live confirmation poll (live only after ingest connects). */
+export const getOwnerStatus =
+  async (streamId) => {
+    const res =
+      await client.get(
+        `/live-streams/status/${streamId}`
       );
 
     return res.data;

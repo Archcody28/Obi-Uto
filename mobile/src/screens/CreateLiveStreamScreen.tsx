@@ -10,7 +10,6 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -18,7 +17,9 @@ import {
   View,
 } from "react-native";
 
+import { Image } from "expo-image";
 import { router } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 
 import {
   createStream,
@@ -28,12 +29,12 @@ import {
 import { AppTheme } from "../constants/theme";
 
 /*
- * Phase 29 — Creator Live Studio.
+ * Phase 30 — Creator Live entry (Facebook/YouTube-mobile style).
  *
- * Creating a stream does NOT start broadcasting. The phone cannot publish
- * to RTMP directly; the creator streams from OBS (or any RTMP encoder)
- * using the server URL + stream key shown here. The stream flips to LIVE
- * automatically when ingest receives the broadcast.
+ * Title + description + thumbnail -> Create Stream -> server creates the
+ * LiveStream -> navigate straight to /live-camera (real camera preview).
+ * No OBS, no stream-key handling on the phone. RTMP stays backend-only:
+ * the camera screen publishes with the owner-only ingest credentials.
  */
 
 const CATEGORIES = [
@@ -81,7 +82,6 @@ export default function CreateLiveStreamScreen() {
   const [category, setCategory] = useState("General");
   const [thumbnail, setThumbnail] = useState("");
   const [creating, setCreating] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
 
@@ -121,6 +121,21 @@ export default function CreateLiveStreamScreen() {
     setRefreshing(false);
   };
 
+  const pickThumbnail = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission needed", "Allow photo access to pick a thumbnail.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setThumbnail(result.assets[0].uri);
+    }
+  };
+
   const submit = async () => {
     if (!title.trim()) {
       Alert.alert(
@@ -140,22 +155,24 @@ export default function CreateLiveStreamScreen() {
       });
 
       const created = result?.stream;
+      if (!created?._id) {
+        throw new Error("Stream was not created");
+      }
 
       setTitle("");
       setDescription("");
       setThumbnail("");
-
       await loadStreams();
 
-      if (created?._id) {
-        setExpandedId(String(created._id));
-      }
-
-      Alert.alert(
-        "Stream created — not broadcasting yet",
-        result?.message ||
-          "Your stream is waiting. Use the RTMP server URL and stream key below in OBS to start broadcasting."
-      );
+      /* Facebook-style: straight into the live camera preview. */
+      router.push({
+        pathname: "/live-camera",
+        params: {
+          streamId: String(created._id),
+          title: created.title || title.trim(),
+          thumbnail: created.thumbnail || thumbnail.trim(),
+        },
+      });
     } catch (err: any) {
       Alert.alert(
         "Unable to create stream",
@@ -166,12 +183,15 @@ export default function CreateLiveStreamScreen() {
     }
   };
 
-  const shareValue = async (label: string, value: string) => {
-    try {
-      await Share.share({ message: `${label}: ${value}` });
-    } catch {
-      /* user dismissed */
-    }
+  const openCamera = (stream: any) => {
+    router.push({
+      pathname: "/live-camera",
+      params: {
+        streamId: String(stream._id),
+        title: stream.title || "",
+        thumbnail: stream.thumbnail || "",
+      },
+    });
   };
 
   const endStream = (stream: any) => {
@@ -246,16 +266,14 @@ export default function CreateLiveStreamScreen() {
       }
     >
       <Text style={styles.kicker}>Creator Studio</Text>
-      <Text style={styles.title}>Live Studio</Text>
+      <Text style={styles.title}>Go Live</Text>
 
       <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>How broadcasting works</Text>
+        <Text style={styles.infoTitle}>How it works</Text>
         <Text style={styles.infoText}>
-          Creating a stream does NOT start broadcasting. Your phone cannot
-          stream directly — open OBS or another RTMP encoder, paste the
-          server URL and stream key below, and start streaming. The stream
-          goes live automatically the moment the broadcast reaches the
-          server.
+          Name your stream, add a description and thumbnail, then tap Create
+          Stream — your camera opens immediately. Tap Start Live and your phone
+          broadcasts to viewers. No OBS or stream keys needed.
         </Text>
       </View>
 
@@ -264,6 +282,16 @@ export default function CreateLiveStreamScreen() {
       {/* Create form */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Create a new stream</Text>
+
+        {!!thumbnail && (
+          <Image source={{ uri: thumbnail }} style={styles.thumbPreview} contentFit="cover" />
+        )}
+
+        <TouchableOpacity style={styles.secondaryButton} onPress={pickThumbnail}>
+          <Text style={styles.secondaryButtonText}>
+            {thumbnail ? "Change thumbnail" : "Pick thumbnail"}
+          </Text>
+        </TouchableOpacity>
 
         <TextInput
           value={title}
@@ -335,16 +363,13 @@ export default function CreateLiveStreamScreen() {
 
       {streams.length === 0 && (
         <Text style={styles.empty}>
-          You have no streams yet. Create one above to get your RTMP
-          credentials.
+          You have no streams yet. Create one above — your camera opens right
+          away.
         </Text>
       )}
 
-
       {streams.map((stream) => {
         const status = streamStatusOf(stream);
-        const expanded = expandedId === String(stream._id);
-        const ingest = stream.ingest || {};
 
         return (
           <View key={stream._id} style={styles.card}>
@@ -367,30 +392,24 @@ export default function CreateLiveStreamScreen() {
                       : "Waiting for broadcast"}
               </Text>
 
-              {!!stream.playbackUrl && (
-                <Text style={styles.streamMeta} numberOfLines={1}>
-                  Playback: {stream.playbackUrl}
-                </Text>
-              )}
-
               <View style={styles.streamActions}>
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={() =>
-                    setExpandedId(expanded ? null : String(stream._id))
-                  }
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    {expanded ? "Hide setup" : "Show setup & key"}
-                  </Text>
-                </TouchableOpacity>
+                {!stream.endedAt && (
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => openCamera(stream)}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      {stream.isLive ? "Open camera" : "Open camera"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
                 {!!stream.playbackUrl && (
                   <TouchableOpacity
                     style={styles.secondaryButton}
                     onPress={() => previewStream(stream)}
                   >
-                    <Text style={styles.secondaryButtonText}>Preview</Text>
+                    <Text style={styles.secondaryButtonText}>Watch</Text>
                   </TouchableOpacity>
                 )}
 
@@ -404,54 +423,6 @@ export default function CreateLiveStreamScreen() {
                 )}
               </View>
             </View>
-
-            {expanded && (
-              <View style={styles.setupBox}>
-                {!!(ingest.warnings || []).length && (
-                  <View style={styles.warningBox}>
-                    {(ingest.warnings || []).map((warning: string) => (
-                      <Text key={warning} style={styles.warningText}>
-                        ⚠ {warning}
-                      </Text>
-                    ))}
-                  </View>
-                )}
-
-                <Text style={styles.setupLabel}>RTMP server URL</Text>
-                <TouchableOpacity
-                  style={styles.copyRow}
-                  onPress={() =>
-                    shareValue("RTMP server URL", ingest.rtmpUrl || "")
-                  }
-                >
-                  <Text style={styles.copyValue} selectable>
-                    {ingest.rtmpUrl || "Unavailable — set RTMP_PUBLIC_URL/PUBLIC_HOST"}
-                  </Text>
-                  <Text style={styles.copyHint}>Share</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.setupLabel}>Stream key</Text>
-                <TouchableOpacity
-                  style={styles.copyRow}
-                  onPress={() => shareValue("Stream key", stream.streamKey || "")}
-                >
-                  <Text style={styles.copyValue} selectable>
-                    {stream.streamKey || "Unavailable"}
-                  </Text>
-                  <Text style={styles.copyHint}>Share</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.setupSteps}>
-                  1. Open OBS (or any RTMP encoder) on your computer.{"\n"}
-                  2. Settings → Stream → Custom server: paste the server URL.{"\n"}
-                  3. Paste the stream key.{"\n"}
-                  4. Click Start Streaming — this stream goes LIVE
-                  automatically.{"\n"}
-                  5. Keep the key secret — anyone with it can broadcast on
-                  your stream.
-                </Text>
-              </View>
-            )}
           </View>
         );
       })}
@@ -606,6 +577,14 @@ const styles = StyleSheet.create({
   buttonText: {
     color: AppTheme.colors.background,
     fontWeight: "900",
+  },
+
+  thumbPreview: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    borderRadius: AppTheme.radius.sm,
+    marginBottom: 12,
+    backgroundColor: AppTheme.colors.surfaceSoft,
   },
 
   empty: {

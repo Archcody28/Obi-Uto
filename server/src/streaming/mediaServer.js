@@ -86,6 +86,20 @@ function streamKeyFromPath(streamPath) {
 }
 
 /* Stream Started (authoritative "live" signal: a publisher is attached). */
+nms.on("prePublish", async (_id, streamPath) => {
+  const streamKey = streamKeyFromPath(streamPath);
+  if (!streamKey) return;
+  try {
+    const exists = await LiveStream.exists({ streamKey });
+    if (!exists) {
+      const session = nms.getSession(_id);
+      if (session && typeof session.reject === "function") session.reject();
+    }
+  } catch (err) {
+    console.error("[live] prePublish error:", err.message);
+  }
+});
+
 nms.on("postPublish", async (_id, streamPath) => {
   const streamKey = streamKeyFromPath(streamPath);
   if (!streamKey) return;
@@ -105,6 +119,9 @@ nms.on("postPublish", async (_id, streamPath) => {
           startedAt: stream.startedAt || new Date(),
           endedAt: null,
           playbackUrl: `${ingest.mediaBaseUrl}/live/${streamKey}/index.m3u8`,
+          publisherHeartbeatAt: new Date(),
+          mobileSessionActive: stream.publisherSource === "mobile" ? true : stream.mobileSessionActive,
+          publisherSource: stream.publisherSource === "mobile" ? "mobile" : "external",
         },
       }
     );
@@ -128,6 +145,7 @@ nms.on("donePublish", async (_id, streamPath) => {
           isLive: false,
           endedAt: new Date(),
           viewers: 0,
+          mobileSessionActive: false,
         },
       },
       { new: true }
@@ -172,6 +190,7 @@ async function reconcileStaleLiveStreams() {
         isLive: false,
         endedAt: new Date(),
         viewers: 0,
+        mobileSessionActive: false,
       },
     }
   );
