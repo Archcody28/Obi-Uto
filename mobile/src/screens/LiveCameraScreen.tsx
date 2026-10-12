@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -25,6 +26,7 @@ import { AppTheme } from "../constants/theme";
 import {
   buildPublishUrl,
   getNativePublishCapability,
+  loadNodePublisher,
 } from "../services/livePublishService";
 
 /*
@@ -62,7 +64,22 @@ export default function LiveCameraScreen() {
   const [starting, setStarting] = useState(false);
   const [ending, setEnding] = useState(false);
 
-  const capability = getNativePublishCapability();
+  /* Phase 30.1: resolve the native-publisher capability once, never letting a
+     native-module failure escape into rendering. Expo Go gets a deterministic
+     unavailable result; dev builds load NodePublisher via the guarded path. */
+  const capability = useMemo(() => {
+    try {
+      const cap = getNativePublishCapability();
+      if (cap && typeof cap === "object") return cap;
+    } catch {}
+    return {
+      available: false,
+      NodePublisher: null,
+      reason:
+        "Live broadcasting needs a custom development build with the native publisher. " +
+        "Expo Go cannot broadcast camera RTMP.",
+    };
+  }, []);
   const NodePublisher = capability.NodePublisher;
   const publisherRef = useRef(null);
   const pollRef = useRef(null);
@@ -195,7 +212,11 @@ export default function LiveCameraScreen() {
       ]);
       return;
     }
-    if (!capability.available || !NodePublisher) {
+    /* Phase 30.1: the native publisher is (re)loaded only inside this guarded
+       start path. Expo Go resolves to null here and exits with the
+       development-build message — never a native-module crash. */
+    const Publisher = loadNodePublisher();
+    if (!capability.available || !NodePublisher || !Publisher) {
       Alert.alert("Development build required", capability.reason);
       return;
     }
