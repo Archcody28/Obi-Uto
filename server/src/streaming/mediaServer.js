@@ -85,15 +85,29 @@ function streamKeyFromPath(streamPath) {
   return parts.length >= 2 ? parts[1] : null;
 }
 
-/* Stream Started (authoritative "live" signal: a publisher is attached). */
+/* Stream Started (authoritative "live" signal: a publisher is attached).
+ * Phase 30.3 diagnostics: log sanitized connection/key-validation results
+ * (never the full stream key) so a physical-device failure is traceable. */
 nms.on("prePublish", async (_id, streamPath) => {
   const streamKey = streamKeyFromPath(streamPath);
-  if (!streamKey) return;
+  const redacted = streamKey ? `...${String(streamKey).slice(-4)}` : "(missing)";
+  if (!streamKey) {
+    console.warn("[live] prePublish: missing stream key in path; rejecting");
+    try {
+      const session = nms.getSession(_id);
+      if (session && typeof session.reject === "function") session.reject();
+    } catch (_err) { /* ignore */ }
+    return;
+  }
+  console.log(`[live] prePublish: incoming RTMP connection (key ${redacted})`);
   try {
     const exists = await LiveStream.exists({ streamKey });
     if (!exists) {
+      console.warn(`[live] prePublish: unknown stream key ${redacted}; publisher rejected`);
       const session = nms.getSession(_id);
       if (session && typeof session.reject === "function") session.reject();
+    } else {
+      console.log(`[live] prePublish: stream key ${redacted} validated; awaiting postPublish`);
     }
   } catch (err) {
     console.error("[live] prePublish error:", err.message);
@@ -102,16 +116,20 @@ nms.on("prePublish", async (_id, streamPath) => {
 
 nms.on("postPublish", async (_id, streamPath) => {
   const streamKey = streamKeyFromPath(streamPath);
-  if (!streamKey) return;
+  const redacted = streamKey ? `...${String(streamKey).slice(-4)}` : "(missing)";
+  if (!streamKey) {
+    console.warn("[live] postPublish: missing stream key; cannot mark live");
+    return;
+  }
 
   try {
     const stream = await LiveStream.findOne({ streamKey });
     if (!stream) {
-      console.warn(`[live] publish attempt with unknown stream key; rejected (no matching stream)`);
+      console.warn(`[live] publish attempt with unknown stream key ${redacted}; rejected (no matching stream)`);
       return;
     }
 
-    await LiveStream.updateOne(
+    const result = await LiveStream.updateOne(
       { _id: stream._id },
       {
         $set: {
@@ -126,7 +144,7 @@ nms.on("postPublish", async (_id, streamPath) => {
       }
     );
 
-    console.log(`[live] LIVE: ${stream.title} (${stream._id})`);
+    console.log(`[live] LIVE: ${stream.title} (${stream._id}); key ${redacted} matched=${result.matchedCount} modified=${result.modifiedCount}`);
   } catch (err) {
     console.error("[live] postPublish error:", err.message);
   }

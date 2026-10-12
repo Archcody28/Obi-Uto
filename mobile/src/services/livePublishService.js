@@ -106,10 +106,32 @@ export function loadNodePublisher() {
   }
 }
 
-/* RTMP publish URL: server URL + /live/ + stream key (never shown to user). */
+/* RTMP publish URL: server URL + /live/ + stream key (never shown to user).
+ * Phase 30.3: strip a stale "/live" suffix from the configured base so the
+ * phone builds rtmp://host:1935/live/<key> exactly once. The physical phone
+ * must never publish to localhost/127.0.0.1. */
 export function buildPublishUrl(rtmpUrl, streamKey) {
-  const base = String(rtmpUrl || "").replace(/\/+$/, "");
+  const base = String(rtmpUrl || "")
+    .replace(/\/+$/, "")
+    .replace(/\/(live(?:\/live)*)$/i, "");
   return `${base}/live/${String(streamKey || "")}`;
+}
+
+/* Sanitized ingest diagnostics: host/port/path only, key redacted. */
+export function describePublishUrl(publishUrl) {
+  try {
+    const u = new URL(String(publishUrl || "").replace(/^rtmp:/i, "http:"));
+    const key = String(publishUrl || "").split("/").filter(Boolean).pop() || "";
+    return {
+      host: u.hostname,
+      port: u.port || "1935",
+      pathPrefix: "/live",
+      keySuffix: key ? `...${key.slice(-4)}` : "(missing)",
+      isLoopback: u.hostname === "localhost" || u.hostname === "127.0.0.1",
+    };
+  } catch {
+    return { host: "(unparseable)", port: "", pathPrefix: "/live", keySuffix: "(redacted)", isLoopback: true };
+  }
 }
 
 export function isDevelopmentBuildRequired(capability) {

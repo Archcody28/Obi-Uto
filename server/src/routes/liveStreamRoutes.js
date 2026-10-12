@@ -25,6 +25,7 @@ const {
 } = require("../controllers/liveStreamController");
 
 const authMiddleware = require("../middleware/authMiddleware");
+const { livePollLimiter } = require("../middleware/rateLimitMiddleware");
 
 const router = express.Router();
 
@@ -32,11 +33,12 @@ const router = express.Router();
 router.get("/live", getLiveStreams);
 router.get("/discover", getDiscovery);
 
-/* Authenticated creator endpoints (ownership verified per request). */
-router.get("/mine", authMiddleware, getMyStreams);
+/* Phase 30.3: polling endpoints get the dedicated high-frequency budget
+ * (300/min) instead of consuming the shared 100/15min apiLimiter budget. */
+router.get("/mine", authMiddleware, livePollLimiter, getMyStreams);
 router.get("/ingest/:id", authMiddleware, getIngestInfo);
-router.get("/status/:id", authMiddleware, getOwnerStatus);
-router.post("/mobile-signal/:id", authMiddleware, mobileSignal);
+router.get("/status/:id", authMiddleware, livePollLimiter, getOwnerStatus);
+router.post("/mobile-signal/:id", authMiddleware, livePollLimiter, mobileSignal);
 router.post("/", authMiddleware, createStream);
 router.post("/schedule", authMiddleware, scheduleStream);
 router.put("/start/:id", authMiddleware, startStream);

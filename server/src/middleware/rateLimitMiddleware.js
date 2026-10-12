@@ -10,9 +10,15 @@ const rateLimit = (options = {}) => {
     max = 100, // max requests per window
     message = "Too many requests, please try again later.",
     keyGenerator = (req) => req.ip || req.connection.remoteAddress,
+    skip = null, // Phase 30.3: optional (req) => boolean to exempt paths
   } = options;
 
   return (req, res, next) => {
+    if (typeof skip === "function") {
+      try {
+        if (skip(req)) return next();
+      } catch (_err) { /* fall through to normal limiting */ }
+    }
     const key = keyGenerator(req);
     const now = Date.now();
 
@@ -37,10 +43,12 @@ const rateLimit = (options = {}) => {
 
     // Check limit
     if (record.count >= max) {
+      const retryAfter = Math.ceil((record.resetTime - now) / 1000);
+      res.set("Retry-After", String(retryAfter));
       return res.status(429).json({
         success: false,
         message,
-        retryAfter: Math.ceil((record.resetTime - now) / 1000),
+        retryAfter,
       });
     }
 
@@ -70,9 +78,27 @@ const apiLimiter = rateLimit({
   message: "Too many requests. Please slow down.",
 });
 
+/*
+ * Phase 30.3 — targeted live-polling budget.
+ * Proven 429 cause: the shared apiLimiter (100 req / 15 min per IP) is shared
+ * by EVERY /api/* route on one phone IP. CreateLiveStreamScreen polls
+ * GET /mine every 5s (12/min), LiveCameraScreen polls GET /status/:id every
+ * 2s during connect (30/min) plus heartbeat POSTs — a few studio screens plus
+ * Metro asset/proxy traffic on the same IP exhausts 100 quickly, and the
+ * throttled owner-status poll then blocks "server confirmed" forever.
+ * Fix: a dedicated per-route limiter (300 / 60s) ONLY for the three polling
+ * endpoints, wired ahead of the shared apiLimiter. Global limits untouched.
+ */
+const livePollLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 300, // 300 polling hits per minute per IP (5/sec sustained)
+  message: "Too many live-status requests. Backing off briefly.",
+});
+
 module.exports = {
   rateLimit,
   authLimiter,
   paymentLimiter,
   apiLimiter,
+  livePollLimiter,
 };

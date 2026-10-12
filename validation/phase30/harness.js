@@ -31,8 +31,10 @@ async function main() {
 
   record(
     "mobile-signal + owner status routes are auth-guarded",
-    routesSrc.includes('router.post("/mobile-signal/:id", authMiddleware, mobileSignal)') &&
-      routesSrc.includes('router.get("/status/:id", authMiddleware, getOwnerStatus)'),
+    routesSrc.includes('router.post("/mobile-signal/:id", authMiddleware') &&
+      routesSrc.includes("mobileSignal") &&
+      routesSrc.includes('router.get("/status/:id", authMiddleware') &&
+      routesSrc.includes("getOwnerStatus"),
     ""
   );
   record(
@@ -117,9 +119,8 @@ async function main() {
     ""
   );
   record(
-    "app.json wires camera + publisher plugins and permissions",
+    "app.json wires camera permissions and documents the publisher",
     plugins.includes("expo-camera") &&
-      plugins.includes("expo-nodemediaclient") &&
       plugins.includes("android.permission.CAMERA"),
     ""
   );

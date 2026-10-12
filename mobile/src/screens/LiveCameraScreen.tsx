@@ -25,6 +25,7 @@ import {
 import { AppTheme } from "../constants/theme";
 import {
   buildPublishUrl,
+  describePublishUrl,
   getNativePublishCapability,
   loadNodePublisher,
 } from "../services/livePublishService";
@@ -86,10 +87,15 @@ export default function LiveCameraScreen() {
   const heartbeatRef = useRef(null);
   const mountedRef = useRef(true);
   const liveRef = useRef(false);
-  liveRef.current = live;
+  useEffect(() => {
+    liveRef.current = live;
+  }, [live]);
 
   const stopTimers = useCallback(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
+    }
     if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     pollRef.current = null;
     heartbeatRef.current = null;
@@ -162,9 +168,11 @@ export default function LiveCameraScreen() {
 
   const pollForLive = useCallback((id, deadline) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    let consecutive429 = 0;
     pollRef.current = setInterval(async () => {
       try {
         const status = await getOwnerStatus(id);
+        consecutive429 = 0;
         const info = status?.stream || {};
         if (mountedRef.current && typeof info.viewers === "number") setViewers(info.viewers);
         if (status?.live || info?.isLive) {
@@ -178,7 +186,19 @@ export default function LiveCameraScreen() {
           }
           return;
         }
-      } catch {}
+      } catch (err: any) {
+        /* Phase 30.3: transient 429 (or offline) must not kill confirmation.
+         * Back off briefly and keep polling until the deadline. */
+        if (err?.response?.status === 429) {
+          consecutive429 += 1;
+          const backoffMs = Math.min(2000 * Math.pow(2, consecutive429 - 1), 8000);
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = setTimeout(() => {
+            if (mountedRef.current) pollForLive(id, deadline);
+          }, backoffMs) as any;
+          return;
+        }
+      }
       if (Date.now() > deadline) {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
@@ -230,6 +250,16 @@ export default function LiveCameraScreen() {
         stream?.streamKey || ingest?.streamKey
       );
       if (!publishUrl || publishUrl.endsWith("/live/")) throw new Error("Ingest unavailable");
+      /* Phase 30.3 sanitized publish log: host/port/prefix only, key redacted. */
+      const diag = describePublishUrl(publishUrl);
+      console.log(
+        `[live] publishing host=${diag.host} port=${diag.port} path=${diag.pathPrefix} key=${diag.keySuffix}`
+      );
+      if (diag.isLoopback) {
+        throw new Error(
+          `Ingest host is ${diag.host} — unreachable from a physical phone. Set server RTMP_PUBLIC_URL to the PC LAN IP.`
+        );
+      }
       await sendMobileSignal(streamId, "publishing");
       setPhase("connecting");
       await publisherRef.current?.start?.(publishUrl);
@@ -312,7 +342,9 @@ export default function LiveCameraScreen() {
             onEventCallback={(event) => {
               const msg = event?.nativeEvent?.msg;
               if (msg && typeof msg === "string" && /fail|error|denied/i.test(msg)) {
-                setError(msg);
+                /* Phase 30.3: surface native RTMP failures (e.g. error -111
+                 * connection refused) so PREVIEW never hangs silently. */
+                if (mountedRef.current) setError(`Publish error: ${msg}`);
               }
             }}
           />

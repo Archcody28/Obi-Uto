@@ -52,9 +52,17 @@ function resolveMediaBaseUrl(env = process.env) {
   return `http://localhost:${Number(env.MEDIA_PORT) || DEFAULT_MEDIA_PORT}`;
 }
 
+function stripLiveSuffix(url) {
+  // Operators sometimes configure RTMP_PUBLIC_URL OBS-style with a trailing
+  // "/live" (e.g. rtmp://host:1935/live). The publisher always appends
+  // "/live/<streamKey>" itself, so a lingering suffix would produce
+  // ".../live/live/<key>" and the ingest key parser would reject it.
+  return String(url).replace(/\/(live(?:\/live)*)\/*$/i, "");
+}
+
 function resolveRtmpUrl(env = process.env) {
   const configured = (env.RTMP_PUBLIC_URL || "").trim();
-  if (configured) return stripTrailingSlashes(configured);
+  if (configured) return stripLiveSuffix(stripTrailingSlashes(configured));
 
   const mediaBase = (env.MEDIA_BASE_URL || "").trim();
   const host =

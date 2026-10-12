@@ -151,7 +151,22 @@ app.use((req, res, next) => {
 // Apply rate limiting to sensitive routes
 app.use("/api/auth", authLimiter);
 app.use("/api/payments", paymentLimiter);
-app.use("/api", apiLimiter);
+// Phase 30.3: live polling endpoints carry their own dedicated limiter
+// (livePollLimiter on the route). Exempt them from the shared 100/15min
+// apiLimiter so studio polling can never exhaust the global API budget.
+const LIVE_POLL_PREFIXES = [
+  "/api/live-streams/mine",
+  "/api/live-streams/status/",
+  "/api/live-streams/mobile-signal/",
+];
+app.use("/api", (req, res, next) => {
+  try {
+    if (LIVE_POLL_PREFIXES.some((p) => req.path === p || req.path.startsWith(p))) {
+      return next();
+    }
+  } catch (_err) { /* fall through to shared limiter */ }
+  return apiLimiter(req, res, next);
+});
 
 app.use("/api/auth", authRoutes);
 app.use("/api/studio", creatorStudioRoutes);
