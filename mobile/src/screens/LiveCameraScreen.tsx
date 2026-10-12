@@ -287,14 +287,34 @@ export default function LiveCameraScreen() {
       <View style={styles.cameraWrap}>
         {capability.available && NodePublisher && hasPermissions ? (
           <NodePublisher
+            key={frontCamera ? "front" : "back"}
             ref={publisherRef}
             style={styles.camera}
             frontCamera={frontCamera}
+            cameraFrontMirror
             volume={muted ? 0 : 1}
-            videoParam={{ width: 720, height: 1280, fps: 30, bitrate: 1500000 }}
-            audioParam={{ samplingRate: 44100, channels: 1, bitrate: 64000 }}
-            videoOrientation={1}
-            onEventCallback={() => {}}
+            videoParam={{
+              codecid: NodePublisher.NMC_CODEC_ID_H264,
+              profile: NodePublisher.NMC_PROFILE_AUTO,
+              width: 720,
+              height: 1280,
+              fps: 30,
+              bitrate: 2000000,
+            }}
+            audioParam={{
+              codecid: NodePublisher.NMC_CODEC_ID_AAC,
+              profile: NodePublisher.NMC_PROFILE_AUTO,
+              samplingRate: 44100,
+              channels: 1,
+              bitrate: 64000,
+            }}
+            videoOrientation={NodePublisher.VIDEO_ORIENTATION_PORTRAIT}
+            onEventCallback={(event) => {
+              const msg = event?.nativeEvent?.msg;
+              if (msg && typeof msg === "string" && /fail|error|denied/i.test(msg)) {
+                setError(msg);
+              }
+            }}
           />
         ) : (
           <View style={[styles.camera, styles.cameraFallback]}>

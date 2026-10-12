@@ -1,5 +1,13 @@
 /*
- * Phase 30.1 — native mobile RTMP publish capability probe (Expo Go safe).
+ * Phase 30.2 — native mobile RTMP publish capability probe (Expo Go safe).
+ *
+ * Detection semantics (Expo documented):
+ * - Constants.appOwnership === "expo"  -> running inside Expo Go: return
+ *   unavailable WITHOUT touching require(), so the missing native module can
+ *   never throw into React rendering.
+ * - null / anything else -> development build, standalone, or web: attempt the
+ *   guarded require("expo-nodemediaclient") and report honestly. Available only
+ *   when the NodePublisher export is actually present and usable.
  *
  * Technology decision: expo-nodemediaclient (NodeMedia NodePublisher) is the
  * native module that publishes the device camera + microphone to the existing
@@ -37,9 +45,11 @@ const DEV_BUILD_REQUIRED_MSG =
 
 function isExpoGo() {
   try {
-    const ownership = Constants?.appOwnership;
-    // `null`/undefined (web) is also treated as "no native publisher".
-    return !ownership || ownership === "expo";
+    // Expo documents appOwnership as "expo" inside Expo Go and null otherwise
+    // (development build / standalone). Only the exact "expo" value may take
+    // the fast path — never treat null as Expo Go, and never rely on
+    // executionEnvironment alone (it can be "storeClient" in either case).
+    return Constants?.appOwnership === "expo";
   } catch {
     return false;
   }
@@ -53,8 +63,9 @@ let cached = null;
 
 export function getNativePublishCapability() {
   if (cached) return cached;
-  // Fast, side-effect-free path: Expo Go (and web) never require() the
-  // native package, so requireNativeModule can never throw into rendering.
+  // Fast, side-effect-free path: ONLY Expo Go skips require(). Every other
+  // environment (dev build with appOwnership null, standalone, web) attempts
+  // the guarded require so a working dev build is never mislabelled Expo Go.
   if (isExpoGo()) {
     cached = unavailable(
       `${DEV_BUILD_REQUIRED_MSG} (running in Expo Go)`
@@ -62,20 +73,25 @@ export function getNativePublishCapability() {
     return cached;
   }
   try {
-    // Lazy + guarded: only a dev build with the native module reaches here.
-    const mod = /** @type {any} */ (require("expo-nodemediaclient"));
-    const anyMod = /** @type {any} */ (mod);
+    // Lazy + guarded: only non-Expo-Go environments reach here.
+    // Direct destructured require keeps Metro from evaluating the native entry
+    // at module scope; any missing-native-module error is caught below.
+    // eslint-disable-next-line
+    const mod = require("expo-nodemediaclient");
     const NodePublisher =
-      anyMod?.NodePublisher ||
-      anyMod?.default?.NodePublisher ||
-      anyMod?.default ||
+      mod?.NodePublisher ||
+      mod?.default?.NodePublisher ||
       null;
-    if (!NodePublisher) throw new Error("NodePublisher export missing");
+    // Usable only when the export exists and looks like a component.
+    if (!NodePublisher || (typeof NodePublisher !== "function" && typeof NodePublisher !== "object")) {
+      throw new Error("NodePublisher export missing or unusable");
+    }
     cached = { available: true, NodePublisher, reason: "" };
   } catch (err) {
-    cached = unavailable(
-      `${DEV_BUILD_REQUIRED_MSG} (${(err && err.message) || err})`
-    );
+    // Honest unavailable: preserve the native error for diagnostics, never
+    // fake broadcasting and never let the error crash React rendering.
+    const detail = (err && err.message) || String(err);
+    cached = unavailable(`${DEV_BUILD_REQUIRED_MSG} (${detail})`);
   }
   return cached;
 }
