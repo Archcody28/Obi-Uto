@@ -79,53 +79,84 @@ const config = {
 
 const nms = new NodeMediaServer(config);
 
-function streamKeyFromPath(streamPath) {
-  // Stream path looks like "/live/<streamKey>"
+function resolveStreamPath(first, second) {
+  // NMS v4 emits a SINGLE session object: emit("prePublish", session) with
+  // session.streamPath === "/live/<streamKey>" (see broadcast_server.js and
+  // index.js on(eventName, (session) => void)). Older docs describe
+  // (id, StreamPath, args); accept a legacy string second arg too, but the
+  // session object's streamPath is authoritative — never a session id.
+  if (first && typeof first === "object" && typeof first.streamPath === "string" && first.streamPath) {
+    return { path: first.streamPath, session: first };
+  }
+  if (typeof second === "string" && second) {
+    return { path: second, session: first && typeof first === "object" ? first : null };
+  }
+  if (typeof first === "string" && first) {
+    return { path: first, session: null };
+  }
+  return { path: "", session: first && typeof first === "object" ? first : null };
+}
+
+function redactKey(key) {
+  return key ? `...${String(key).slice(-4)}` : "(missing)";
+}
+
+function extractStreamKey(streamPath) {
+  // Require exactly "/live/<key>": two non-empty segments, app "live",
+  // 48-char hex key (generateStreamKey = 24 random bytes as hex). Returns the
+  // COMPLETE key or null — never a truncated/partial value.
   const parts = String(streamPath || "").split("/").filter(Boolean);
-  return parts.length >= 2 ? parts[1] : null;
+  if (parts.length !== 2) return null;
+  if (parts[0] !== "live") return null;
+  if (!/^[0-9a-f]{48}$/i.test(parts[1])) return null;
+  return parts[1];
+}
+
+function rejectSession(session) {
+  // NMS v4 sessions expose no reject(): close the socket to refuse publish.
+  try {
+    if (session && typeof session.close === "function") session.close();
+    else if (session && session.socket && typeof session.socket.end === "function") session.socket.end();
+  } catch (_err) { /* ignore */ }
 }
 
 /* Stream Started (authoritative "live" signal: a publisher is attached).
- * Phase 30.3 diagnostics: log sanitized connection/key-validation results
- * (never the full stream key) so a physical-device failure is traceable. */
-nms.on("prePublish", async (_id, streamPath) => {
-  const streamKey = streamKeyFromPath(streamPath);
-  const redacted = streamKey ? `...${String(streamKey).slice(-4)}` : "(missing)";
+ * Phase 30.4: NMS v4 emits ONE session object (not (id, path)); the key comes
+ * from session.streamPath. Diagnostics are single-line per outcome, key
+ * redacted. Validation stays enforced. */
+nms.on("prePublish", async (first, second) => {
+  const { path: streamPath, session } = resolveStreamPath(first, second);
+  const streamKey = extractStreamKey(streamPath);
   if (!streamKey) {
-    console.warn("[live] prePublish: missing stream key in path; rejecting");
-    try {
-      const session = nms.getSession(_id);
-      if (session && typeof session.reject === "function") session.reject();
-    } catch (_err) { /* ignore */ }
+    console.warn(`[live] prePublish: malformed stream path; rejecting (path segments rejected)`);
+    rejectSession(session);
     return;
   }
-  console.log(`[live] prePublish: incoming RTMP connection (key ${redacted})`);
   try {
     const exists = await LiveStream.exists({ streamKey });
     if (!exists) {
-      console.warn(`[live] prePublish: unknown stream key ${redacted}; publisher rejected`);
-      const session = nms.getSession(_id);
-      if (session && typeof session.reject === "function") session.reject();
+      console.warn(`[live] prePublish: unknown stream key ${redactKey(streamKey)}; publisher rejected`);
+      rejectSession(session);
     } else {
-      console.log(`[live] prePublish: stream key ${redacted} validated; awaiting postPublish`);
+      console.log(`[live] prePublish: key ${redactKey(streamKey)} accepted; awaiting postPublish`);
     }
   } catch (err) {
     console.error("[live] prePublish error:", err.message);
   }
 });
 
-nms.on("postPublish", async (_id, streamPath) => {
-  const streamKey = streamKeyFromPath(streamPath);
-  const redacted = streamKey ? `...${String(streamKey).slice(-4)}` : "(missing)";
+nms.on("postPublish", async (first, second) => {
+  const { path: streamPath } = resolveStreamPath(first, second);
+  const streamKey = extractStreamKey(streamPath);
   if (!streamKey) {
-    console.warn("[live] postPublish: missing stream key; cannot mark live");
+    console.warn("[live] postPublish: malformed stream path; cannot mark live");
     return;
   }
 
   try {
     const stream = await LiveStream.findOne({ streamKey });
     if (!stream) {
-      console.warn(`[live] publish attempt with unknown stream key ${redacted}; rejected (no matching stream)`);
+      console.warn(`[live] postPublish: unknown stream key ${redactKey(streamKey)}; no document updated`);
       return;
     }
 
@@ -144,16 +175,20 @@ nms.on("postPublish", async (_id, streamPath) => {
       }
     );
 
-    console.log(`[live] LIVE: ${stream.title} (${stream._id}); key ${redacted} matched=${result.matchedCount} modified=${result.modifiedCount}`);
+    console.log(`[live] LIVE: ${stream.title} (${stream._id}); key ${redactKey(streamKey)} matched=${result.matchedCount} modified=${result.modifiedCount}`);
   } catch (err) {
     console.error("[live] postPublish error:", err.message);
   }
 });
 
 /* Stream Ended */
-nms.on("donePublish", async (_id, streamPath) => {
-  const streamKey = streamKeyFromPath(streamPath);
-  if (!streamKey) return;
+nms.on("donePublish", async (first, second) => {
+  const { path: streamPath } = resolveStreamPath(first, second);
+  const streamKey = extractStreamKey(streamPath);
+  if (!streamKey) {
+    console.warn("[live] donePublish: malformed stream path; nothing to end");
+    return;
+  }
 
   try {
     const stream = await LiveStream.findOneAndUpdate(
@@ -245,3 +280,8 @@ scheduleReconciliation();
 
 module.exports = nms;
 module.exports.reconcileStaleLiveStreams = reconcileStaleLiveStreams;
+/* Phase 30.4: parser/test seam (no secrets). */
+module.exports.resolveStreamPath = resolveStreamPath;
+module.exports.extractStreamKey = extractStreamKey;
+module.exports.redactKey = redactKey;
+module.exports.rejectSession = rejectSession;
