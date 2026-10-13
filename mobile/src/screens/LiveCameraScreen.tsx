@@ -365,10 +365,11 @@ export default function LiveCameraScreen() {
     <View style={styles.container}>
       <View style={styles.cameraWrap}>
         {capability.available && NodePublisher && hasPermissions ? (
-          {/* Phase 30.5: NO key={frontCamera} — remounting NodePublisher
-              mid-publish kills the RTMP socket (the ~15s "mystery" drop when
-              a re-render flips the key). frontCamera is a live prop. */}
-          <NodePublisher
+          <>
+            {/* Phase 30.5: NO key={frontCamera} — remounting NodePublisher
+                mid-publish kills the RTMP socket (the ~15s "mystery" drop when
+                a re-render flips the key). frontCamera is a live prop. */}
+            <NodePublisher
             ref={publisherRef}
             style={styles.camera}
             frontCamera={frontCamera}
@@ -404,6 +405,7 @@ export default function LiveCameraScreen() {
               }
             }}
           />
+          </>
         ) : (
           <View style={[styles.camera, styles.cameraFallback]}>
             <Text style={styles.fallbackTitle}>
