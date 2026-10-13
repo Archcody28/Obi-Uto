@@ -56,6 +56,16 @@ const trans = ingest.ffmpegPath
     }
   : undefined;
 
+/* Phase 30.5 finding: node-media-server v4 has NO ffmpeg/transcode consumer —
+ * the `trans` config block is inert (no transcode server exists in v4 src)
+ * and the record server only writes raw .flv when `record.path` is set
+ * (record_server.js). Our config sets neither, so no MP4 is ever produced
+ * and finalizeRecording honestly reports "no-recording-file" (cleanup
+ * unaffected, by design). Enablement is a future explicit step:
+ * set NMS_RECORD_PATH + record.path, after which findRecording probes the
+ * "<record.path>/live/<key>/<ts>.flv" layout. HLS likewise needs an
+ * external packager — postPublish advertises the playback URL template,
+ * but no segments exist until one is wired. */
 const config = {
   rtmp: {
     port: Number(process.env.RTMP_PORT) || 1935,
@@ -206,7 +216,16 @@ nms.on("donePublish", async (first, second) => {
 
     if (!stream) return;
 
-    console.log(`[live] ENDED: ${stream.title} (${stream._id})`);
+    /* Phase 30.5: attribute the drop — donePublish with a still-fresh
+     * heartbeat means the socket died underneath a healthy session
+     * (network/NMS-side), not a client-initiated end. Key redacted. */
+    const hbAgeMs = stream.publisherHeartbeatAt
+      ? Date.now() - new Date(stream.publisherHeartbeatAt).getTime()
+      : -1;
+    const hbNote = hbAgeMs >= 0 && hbAgeMs < 30000
+      ? `heartbeat ${Math.round(hbAgeMs / 1000)}s ago (socket drop under healthy session?)`
+      : `last heartbeat ${hbAgeMs >= 0 ? `${Math.round(hbAgeMs / 1000)}s ago` : "never"}`;
+    console.log(`[live] ENDED: ${stream.title} (${stream._id}); key ${redactKey(streamKey)}; ${hbNote}`);
 
     // Tell everyone in the chat room the broadcast stopped.
     try {

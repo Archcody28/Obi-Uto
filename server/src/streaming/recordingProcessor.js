@@ -12,27 +12,46 @@ const path = require("path");
 /*
  * NodeMediaServer writes recordings into <mediaroot>/live. Depending on the
  * version/flags the file is either exactly "<streamKey>.mp4" or carries a
- * timestamp suffix ("<streamKey>_<epoch>.mp4"). Pick the newest match.
+ * timestamp suffix ("<streamKey>_<epoch>.mp4").
+ * Phase 30.5: the NMS v4 record server (when config.record.path is set)
+ * writes "<record.path>/<streamPath>/<epoch>.flv" instead — probe that
+ * layout too so an enabled recorder is discoverable. Pick the newest match.
  */
-function findRecording(mediaRoot, streamKey) {
+function findRecording(mediaRoot, streamKey, { recordPath = process.env.NMS_RECORD_PATH || "" } = {}) {
   if (!mediaRoot || !streamKey) return null;
 
-  const dir = path.join(mediaRoot, "live");
+  const candidates = [];
+  const mp4Dir = path.join(mediaRoot, "live");
 
   let entries = [];
   try {
-    entries = fs.readdirSync(dir);
+    entries = fs.readdirSync(mp4Dir);
   } catch (_err) {
-    return null;
+    entries = [];
   }
 
-  const matches = entries
-    .filter((file) => file.startsWith(streamKey) && file.endsWith(".mp4"))
-    .sort();
+  for (const file of entries.filter((f) => f.startsWith(streamKey) && f.endsWith(".mp4"))) {
+    candidates.push(path.join(mp4Dir, file));
+  }
 
-  if (!matches.length) return null;
+  // NMS v4 FLV layout: <record.path>/live/<streamKey>/<epoch>.flv
+  if (recordPath) {
+    const flvDir = path.join(recordPath, "live", streamKey);
+    let flvEntries = [];
+    try {
+      flvEntries = fs.readdirSync(flvDir);
+    } catch (_err) {
+      flvEntries = [];
+    }
+    for (const file of flvEntries.filter((f) => f.endsWith(".flv"))) {
+      candidates.push(path.join(flvDir, file));
+    }
+  }
 
-  return path.join(dir, matches[matches.length - 1]);
+  if (!candidates.length) return null;
+
+  candidates.sort();
+  return candidates[candidates.length - 1];
 }
 
 async function finalizeRecording({

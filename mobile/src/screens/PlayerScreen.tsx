@@ -171,6 +171,16 @@ export default function PlayerScreen() {
       : params.streamId ||
         mediaId;
 
+  /*
+   * Phase 30.5: mediaId doubles as the stream id for live entries (LiveNowRow
+   * and creator preview pass mediaId = LiveStream._id, NOT a Media id).
+   * Media-only effects (details/artwork/episodes/download/progress) must be
+   * skipped while live — otherwise GET /media/<liveStreamId> 404s on every
+   * viewer open (the Metro Axios 404). Live status comes from the
+   * live-streams endpoint polled below.
+   */
+  const mediaIdForMediaApis = isLive ? null : mediaId;
+
   const creatorId =
     Array.isArray(
       params.creatorId
@@ -308,9 +318,9 @@ export default function PlayerScreen() {
   const downloadEntry =
     useDownloadStore(
       (state) =>
-        mediaId
+        mediaIdForMediaApis
           ? state.downloads.find(
-              (item) => item.id === mediaId
+              (item) => item.id === mediaIdForMediaApis
             )
           : undefined
     );
@@ -384,20 +394,20 @@ export default function PlayerScreen() {
   }, [loadDownloads]);
 
   /**
-   * Offline pin lifecycle:
+   * Offline pin lifecycle (VOD only — live never pins downloads):
    * - recover honestly when the pinned local file disappeared (never keep
    *   a false completed state);
    * - adopt a completed local file only while playback has not started yet,
    *   so a download completing mid-video never restarts the stream.
    */
   useEffect(() => {
-    if (!mediaId) {
+    if (!mediaIdForMediaApis) {
       return;
     }
 
     const pinned = offlinePinRef.current;
 
-    if (pinned.id === mediaId && pinned.uri) {
+    if (pinned.id === mediaIdForMediaApis && pinned.uri) {
       let alive = true;
 
       verifyLocalFile(pinned.uri)
@@ -407,14 +417,14 @@ export default function PlayerScreen() {
           }
 
           offlinePinRef.current = {
-            id: mediaId,
+            id: mediaIdForMediaApis,
             uri: null,
           };
           setOfflinePinEpoch((epoch) => epoch + 1);
 
           useDownloadStore
             .getState()
-            .updateDownload(mediaId, {
+            .updateDownload(mediaIdForMediaApis, {
               status: "failed",
               uri: null,
               progress: 0,
@@ -447,24 +457,24 @@ export default function PlayerScreen() {
       }
 
       offlinePinRef.current = {
-        id: mediaId,
+        id: mediaIdForMediaApis,
         uri: downloadEntry.uri,
       };
       setOfflinePinEpoch((epoch) => epoch + 1);
     }
-  }, [mediaId, downloadEntry, player]);
+  }, [mediaIdForMediaApis, downloadEntry, player]);
 
   /**
-   * Load saved progress
+   * Load saved progress (VOD only — live streams have no watch progress).
    */
   useEffect(() => {
-    if (!mediaId) {
+    if (!mediaIdForMediaApis) {
       return;
     }
 
     let alive = true;
 
-    getProgress(mediaId)
+    getProgress(mediaIdForMediaApis)
       .then((data) => {
         if (!alive || !mountedRef.current) {
           return;
@@ -479,19 +489,19 @@ export default function PlayerScreen() {
     return () => {
       alive = false;
     };
-  }, [mediaId]);
+  }, [mediaIdForMediaApis]);
 
   /**
-   * Load artwork for the download record (thumbnail/banner).
+   * Load artwork for the download record (thumbnail/banner). VOD only.
    */
   useEffect(() => {
-    if (!mediaId) {
+    if (!mediaIdForMediaApis) {
       return;
     }
 
     let alive = true;
 
-    getMediaDetails(mediaId)
+    getMediaDetails(mediaIdForMediaApis)
       .then((data) => {
         if (alive && data) {
           setDownloadArt(data?.media || data);
@@ -502,24 +512,24 @@ export default function PlayerScreen() {
     return () => {
       alive = false;
     };
-  }, [mediaId]);
+  }, [mediaIdForMediaApis]);
 
   /**
-   * Set current media
+   * Set current media (VOD only — live uses the live-streams status poll).
    */
   useEffect(() => {
-    if (!mediaId) {
+    if (!mediaIdForMediaApis) {
       return;
     }
 
     setCurrentMedia({
-      mediaId,
+      mediaId: mediaIdForMediaApis,
       title,
       videoUrl:
         onlineVideoUrl,
     });
   }, [
-    mediaId,
+    mediaIdForMediaApis,
     title,
     onlineVideoUrl,
     setCurrentMedia,
@@ -643,18 +653,18 @@ export default function PlayerScreen() {
   }, [mediaId, player, isLive, title, saveLocalProgress]);
 
   /**
-   * Load next episode
+   * Load next episode (VOD series only — skipped while live).
    */
   const loadNextEpisode =
     async () => {
       try {
-        if (!mediaId) {
+        if (!mediaIdForMediaApis) {
           return;
         }
 
         const media =
           await getMediaDetails(
-            mediaId
+            mediaIdForMediaApis
           );
 
         if (
@@ -704,7 +714,7 @@ export default function PlayerScreen() {
 
   useEffect(() => {
     loadNextEpisode();
-  }, [mediaId]);
+  }, [mediaIdForMediaApis]);
 
   /**
    * Auto-play next episode (never touches a released player).
@@ -802,6 +812,15 @@ export default function PlayerScreen() {
   const handleDownload =
     async () => {
       try {
+        if (isLive || !mediaIdForMediaApis) {
+          Alert.alert(
+            "Unavailable while live",
+            "Downloads are for finished videos, not live streams."
+          );
+
+          return;
+        }
+
         if (!mediaId) {
           Alert.alert(
             "Error",
@@ -814,11 +833,11 @@ export default function PlayerScreen() {
         // While a transfer is running, the button acts as Cancel.
         if (
           downloadEntry?.status === "downloading" ||
-          hasActiveDownload(mediaId)
+          hasActiveDownload(mediaIdForMediaApis)
         ) {
-          await cancelDownload(mediaId);
+          await cancelDownload(mediaIdForMediaApis);
 
-          await updateDownload(mediaId, {
+          await updateDownload(mediaIdForMediaApis, {
             status: "cancelled",
             progress: 0,
             error: null,
@@ -831,8 +850,8 @@ export default function PlayerScreen() {
         // immediate downloading state -> authorization -> real byte
         // progress -> validated completion (never a false "completed").
         const result = await startDownload({
-          id: mediaId,
-          mediaId,
+          id: mediaIdForMediaApis,
+          mediaId: mediaIdForMediaApis,
           title: title || "Untitled",
           thumbnail:
             downloadArt?.thumbnail || null,
@@ -885,6 +904,11 @@ export default function PlayerScreen() {
 
   const handleSave = async () => {
     try {
+      if (isLive || !mediaIdForMediaApis) {
+        Alert.alert("Unavailable while live", "Progress saving is for finished videos.");
+        return;
+      }
+
       if (!mediaId) {
         Alert.alert("Error", "Media ID missing");
         return;
@@ -909,9 +933,9 @@ export default function PlayerScreen() {
       }
 
       lastSavedRef.current = currentTime;
-      saveLocalProgress({ id: mediaId, title, progress: currentTime });
+      saveLocalProgress({ id: mediaIdForMediaApis, title, progress: currentTime });
 
-      const payload = { mediaId, currentTime, duration };
+      const payload = { mediaId: mediaIdForMediaApis, currentTime, duration };
 
       try {
         await saveProgressApi(payload);
@@ -931,10 +955,14 @@ export default function PlayerScreen() {
 
   const handleFavorite = async () => {
     try {
+      if (isLive || !mediaIdForMediaApis) {
+        Alert.alert("Unavailable while live", "Favorites are for finished videos.");
+        return;
+      }
       // PHASE 26 — favorites are creator-only; never fake success on external.
       if (
-        checkExternal({ _id: mediaId }) ||
-        (typeof mediaId === "string" && mediaId.indexOf("ia:") === 0)
+        checkExternal({ _id: mediaIdForMediaApis }) ||
+        (typeof mediaIdForMediaApis === "string" && mediaIdForMediaApis.indexOf("ia:") === 0)
       ) {
         Alert.alert(
           "Not available for external titles",
@@ -950,9 +978,9 @@ export default function PlayerScreen() {
 
       const profile = useProfileStore.getState().activeProfile;
 
-      await addFavoriteApi(mediaId);
+      await addFavoriteApi(mediaIdForMediaApis);
 
-      addFavorite({ id: mediaId, _id: mediaId, title, profileId: profile?.id });
+      addFavorite({ id: mediaIdForMediaApis, _id: mediaIdForMediaApis, title, profileId: profile?.id });
 
       Alert.alert("Success", "Saved To Favorites");
     } catch (err: any) {
@@ -995,6 +1023,7 @@ export default function PlayerScreen() {
             <View style={styles.chatPanel}>
               <LiveChatScreen
                 streamId={streamId}
+                scrollEnabled={false}
                 stream={{
                   _id: streamId,
                   creatorId,
@@ -1113,6 +1142,7 @@ export default function PlayerScreen() {
         <View style={styles.chatPanel}>
           <LiveChatScreen
             streamId={streamId}
+            scrollEnabled={false}
             stream={{
               _id: streamId,
               creatorId,

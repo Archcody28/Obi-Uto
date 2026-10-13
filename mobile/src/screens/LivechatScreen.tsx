@@ -32,6 +32,11 @@ export default function LiveChatScreen({
   isModerator = false,
   moderatorId = null,
   stream,
+  /* Phase 30.5: when embedded inside PlayerScreen's ScrollView the outer
+   * scroller owns scrolling — the inner FlatList must not scroll itself
+   * (nested VirtualizedLists warning + gesture fights). Standalone usage
+   * keeps the default true. */
+  scrollEnabled = true,
 }) {
   const [
     messages,
@@ -497,6 +502,7 @@ export default function LiveChatScreen({
 
       <FlatList
         data={messages}
+        scrollEnabled={scrollEnabled}
         keyExtractor={(
           item,
           index

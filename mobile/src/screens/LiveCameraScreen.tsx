@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 import { Image } from "expo-image";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import {
   endOwnStream,
@@ -101,23 +101,68 @@ export default function LiveCameraScreen() {
     heartbeatRef.current = null;
   }, []);
 
-  const handleEndedRemotely = useCallback(() => {
+  const stopReasonRef = useRef<string | null>(null);
+  const requestStop = useCallback((reason: string) => {
+    if (stopReasonRef.current) return; // first reason wins; no contradictory logs
+    stopReasonRef.current = reason;
+    console.log(`[live] publish stop requested: ${reason}`);
     stopTimers();
     try {
       publisherRef.current?.stop?.();
     } catch {}
+  }, [stopTimers]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    console.log("[live] camera screen mounted");
+    return () => {
+      mountedRef.current = false;
+      /* Phase 30.5: log WHY the publisher is torn down — an unexpected
+       * unmount (navigation/blur) mid-live is itself a disconnect cause. */
+      if (liveRef.current) {
+        console.log("[live] camera screen UNMOUNTED while live — publisher torn down by navigation");
+      } else {
+        console.log("[live] camera screen unmounted (not live)");
+      }
+      requestStop("unmount-teardown");
+    };
+  }, [stopTimers, requestStop]);
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log(
+        `[live] camera screen focused (live=${liveRef.current ? "yes" : "no"} phase-indicator)`
+      );
+      return () =>
+        console.log(
+          `[live] camera screen blurred (live=${liveRef.current ? "yes" : "no"}; publisher kept alive until unmount/user-end/remote-end)`
+        );
+    }, [])
+  );
+
+  const handleEndedRemotely = useCallback(() => {
+    /* Phase 30.5: only honor a remote end when we were actually live —
+     * a stale heartbeat carrying endedAt must never kill a fresh publish. */
+    if (!liveRef.current) {
+      console.log("[live] remote endedAt seen while not live; ignoring (stale)");
+      return;
+    }
+    console.log("[live] remote end confirmed while live; stopping publisher");
     if (mountedRef.current) {
       setLive(false);
       setPhase("preview");
       setError("The stream ended.");
     }
-  }, [stopTimers]);
+    requestStop("remote-ended");
+  }, [requestStop]);
 
   const startHeartbeat = useCallback((id) => {
     if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    let consecutiveFailures = 0;
     heartbeatRef.current = setInterval(() => {
       sendMobileSignal(id, "heartbeat")
         .then((res) => {
+          consecutiveFailures = 0;
           const info = res?.stream || {};
           if (mountedRef.current && typeof info.viewers === "number") setViewers(info.viewers);
           if (mountedRef.current && (res?.live || info?.isLive) && !liveRef.current) {
@@ -125,22 +170,20 @@ export default function LiveCameraScreen() {
             setPhase("live");
             setLiveAt((prev) => prev ?? Date.now());
           }
+          /* Phase 30.5: only a live session can remotely end. */
           if (mountedRef.current && info?.endedAt) handleEndedRemotely();
         })
-        .catch(() => {});
+        .catch((err) => {
+          /* Phase 30.5: transient heartbeat failure must NEVER stop the
+           * publisher (this killed streams ~15s after start). Log sanitized
+           * status and keep publishing; only an authoritative endedAt while
+           * live may stop it. */
+          consecutiveFailures += 1;
+          const status = err?.response?.status || "network";
+          console.log(`[live] heartbeat failed (${consecutiveFailures}x, status ${status}); keeping publisher alive`);
+        });
     }, 15000);
   }, [handleEndedRemotely]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      stopTimers();
-      try {
-        publisherRef.current?.stop?.();
-      } catch {}
-    };
-  }, [stopTimers]);
 
   useEffect(() => {
     if (!liveAt) return;
@@ -188,7 +231,10 @@ export default function LiveCameraScreen() {
         }
       } catch (err: any) {
         /* Phase 30.3: transient 429 (or offline) must not kill confirmation.
-         * Back off briefly and keep polling until the deadline. */
+         * Back off briefly and keep polling until the deadline.
+         * Phase 30.5: log sanitized poll outcome (status only, never tokens);
+         * non-429 failures keep polling until the deadline — they never stop
+         * the publisher here. */
         if (err?.response?.status === 429) {
           consecutive429 += 1;
           const backoffMs = Math.min(2000 * Math.pow(2, consecutive429 - 1), 8000);
@@ -196,8 +242,11 @@ export default function LiveCameraScreen() {
           pollRef.current = setTimeout(() => {
             if (mountedRef.current) pollForLive(id, deadline);
           }, backoffMs) as any;
+          console.log(`[live] owner-status poll 429; backing off ${backoffMs}ms`);
           return;
         }
+        const pollStatus = err?.response?.status || "network";
+        console.log(`[live] owner-status poll failed (status ${pollStatus}); retrying until deadline`);
       }
       if (Date.now() > deadline) {
         if (pollRef.current) clearInterval(pollRef.current);
@@ -205,14 +254,12 @@ export default function LiveCameraScreen() {
         if (mountedRef.current) {
           setStarting(false);
           setError("Server has not confirmed your broadcast yet. Check connection, then retry.");
-          try {
-            await publisherRef.current?.stop?.();
-          } catch {}
+          requestStop("confirm-timeout");
           setPhase("preview");
         }
       }
     }, 2000);
-  }, []);
+  }, [requestStop]);
 
   const startLive = async () => {
     if (!streamId) {
@@ -262,7 +309,10 @@ export default function LiveCameraScreen() {
       }
       await sendMobileSignal(streamId, "publishing");
       setPhase("connecting");
+      stopReasonRef.current = null; // fresh attempt clears the previous stop reason
+      console.log("[live] publisher start requested");
       await publisherRef.current?.start?.(publishUrl);
+      console.log("[live] publisher start resolved");
       startHeartbeat(String(streamId));
       pollForLive(String(streamId), Date.now() + 30000);
     } catch (err) {
@@ -282,9 +332,8 @@ export default function LiveCameraScreen() {
         onPress: async () => {
           setEnding(true);
           try {
-            try {
-              await publisherRef.current?.stop?.();
-            } catch {}
+            console.log("[live] user requested end");
+            requestStop("user-end");
             try {
               await sendMobileSignal(streamId, "stopped");
             } catch {}
@@ -316,8 +365,10 @@ export default function LiveCameraScreen() {
     <View style={styles.container}>
       <View style={styles.cameraWrap}>
         {capability.available && NodePublisher && hasPermissions ? (
+          {/* Phase 30.5: NO key={frontCamera} — remounting NodePublisher
+              mid-publish kills the RTMP socket (the ~15s "mystery" drop when
+              a re-render flips the key). frontCamera is a live prop. */}
           <NodePublisher
-            key={frontCamera ? "front" : "back"}
             ref={publisherRef}
             style={styles.camera}
             frontCamera={frontCamera}
@@ -341,10 +392,15 @@ export default function LiveCameraScreen() {
             videoOrientation={NodePublisher.VIDEO_ORIENTATION_PORTRAIT}
             onEventCallback={(event) => {
               const msg = event?.nativeEvent?.msg;
-              if (msg && typeof msg === "string" && /fail|error|denied/i.test(msg)) {
-                /* Phase 30.3: surface native RTMP failures (e.g. error -111
-                 * connection refused) so PREVIEW never hangs silently. */
-                if (mountedRef.current) setError(`Publish error: ${msg}`);
+              /* Phase 30.5: log every native publisher event/result so a
+               * server- or socket-side drop is distinguishable from a
+               * client-initiated stop. Reasons are first-wins via requestStop. */
+              if (msg && typeof msg === "string") {
+                console.log(`[live] native publisher event: ${msg}`);
+                if (/fail|error|denied|disconnect|close/i.test(msg)) {
+                  if (mountedRef.current) setError(`Publish error: ${msg}`);
+                  requestStop(`native-event:${msg.slice(0, 80)}`);
+                }
               }
             }}
           />
