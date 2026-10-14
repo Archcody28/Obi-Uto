@@ -95,10 +95,22 @@ const livePollLimiter = rateLimit({
   message: "Too many live-status requests. Backing off briefly.",
 });
 
+/* Phase 30.6: explicit creator-action budget (create/ingest/start/end/update).
+ * Polling/heartbeat stay on livePollLimiter; one-shot actions must never share
+ * a budget with high-frequency polls, and must be exempted from the shared
+ * 100/15min apiLimiter (see index.js) so End Live can never 429 after a long
+ * broadcast on one phone IP. 60/min per IP is generous for taps, still bounded. */
+const liveActionLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60, // 60 explicit creator actions per minute per IP (1/sec sustained)
+  message: "Too many live actions. Please wait a moment and try again.",
+});
+
 module.exports = {
   rateLimit,
   authLimiter,
   paymentLimiter,
   apiLimiter,
   livePollLimiter,
+  liveActionLimiter,
 };

@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCameraPermissions, useMicrophonePermissions } from "expo-camera";
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import {
   endOwnStream,
   getOwnerStatus,
@@ -34,7 +34,24 @@ import {
  * Phase 30 — Live Camera Preview (Facebook/YouTube-mobile style).
  * Real camera preview -> Start Live -> native RTMP publish (NodePublisher)
  * -> poll owner status until real ingest flips isLive=true. No fake live.
+ *
+ * Phase 30.6 — expo-nodemediaclient has NO preview-without-publish mode: the
+ * camera only activates once publisher.start(publishUrl) is called. So the
+ * pre-live preview is an expo-camera CameraView (facing/mirror mirror the
+ * publisher props); on Start Live the preview unmounts FIRST, releasing the
+ * camera, then NodePublisher mounts and starts. Never both at once.
  */
+
+function sanitizePublishError(msg) {
+  /* Phase 30.6: native publisher errors may embed the full rtmp://.../live/<key>
+   * URL. Never surface it — redact URLs/keys, keep actionable text. */
+  const s = String(msg || "Could not start publishing.");
+  const noUrls = s
+    .replace(/rtmp:\/\/\S+/gi, "rtmp://<ingest-host>/live/<key-redacted>")
+    .replace(/https?:\/\/\S+/gi, "https://<redacted>");
+  const noKeys = noUrls.replace(/\b[0-9a-f]{16,}\b/gi, "<key-redacted>");
+  return noKeys.length > 220 ? `${noKeys.slice(0, 220)}…` : noKeys;
+}
 
 function formatDuration(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -64,6 +81,12 @@ export default function LiveCameraScreen() {
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [ended, setEnded] = useState(false);
+  /* Phase 30.6: preview vs publisher ownership. Only one camera consumer may
+   * be mounted at a time. "preview" -> CameraView; "connecting"/"live" ->
+   * NodePublisher. publishUrl is staged in a ref (never in state/logs). */
+  const [publisherActive, setPublisherActive] = useState(false);
+  const publishUrlRef = useRef(null);
 
   /* Phase 30.1: resolve the native-publisher capability once, never letting a
      native-module failure escape into rendering. Expo Go gets a deterministic
@@ -310,17 +333,67 @@ export default function LiveCameraScreen() {
       await sendMobileSignal(streamId, "publishing");
       setPhase("connecting");
       stopReasonRef.current = null; // fresh attempt clears the previous stop reason
-      console.log("[live] publisher start requested");
-      await publisherRef.current?.start?.(publishUrl);
-      console.log("[live] publisher start resolved");
-      startHeartbeat(String(streamId));
+      /* Phase 30.6: stage the URL, hand camera ownership to the publisher:
+       * unmount CameraView first (single setState), start AFTER mount via the
+       * publisher-ready effect below. publishUrl lives only in a ref — never
+       * in state, logs, or error text. */
+      publishUrlRef.current = publishUrl;
+      setPublisherActive(true);
+      setStarting(false);
       pollForLive(String(streamId), Date.now() + 30000);
     } catch (err) {
       setStarting(false);
       setPhase("preview");
-      setError(err?.response?.data?.message || err?.message || "Could not start publishing.");
+      setPublisherActive(false);
+      publishUrlRef.current = null;
+      const raw = err?.response?.data?.message || err?.message || "Could not start publishing.";
+      setError(sanitizePublishError(raw));
     }
   };
+
+  /* Phase 30.6: start the native publisher once it has mounted (camera already
+   * released by the unmounted CameraView). URL/error sanitized — key never shown. */
+  useEffect(() => {
+    if (!publisherActive || !streamId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = publishUrlRef.current;
+        if (!url) throw new Error("Ingest unavailable");
+        console.log("[live] publisher start requested");
+        await publisherRef.current?.start?.(url);
+        if (cancelled) return;
+        console.log("[live] publisher start resolved");
+        startHeartbeat(String(streamId));
+      } catch (err) {
+        if (cancelled || !mountedRef.current) return;
+        setPublisherActive(false);
+        publishUrlRef.current = null;
+        setPhase("preview");
+        setError(sanitizePublishError(err?.message || "Could not start publishing."));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publisherActive]);
+
+  const finishEndedUi = useCallback((message) => {
+    /* Phase 30.6: single consistent teardown — timers cleared, publisher
+     * stopped, UI shows success. Called for backend-confirmed, already-ended,
+     * and offline-verified ends alike. */
+    stopTimers();
+    publishUrlRef.current = null;
+    if (mountedRef.current) {
+      setPublisherActive(false);
+      setLive(false);
+      setPhase("ended");
+      setEnded(true);
+      setEnding(false);
+      setError("");
+    }
+    console.log(`[live] ended: ${message}`);
+    router.replace("/creator-live");
+  }, [stopTimers]);
 
   const endLive = () => {
     if (!streamId) return;
@@ -331,20 +404,69 @@ export default function LiveCameraScreen() {
         style: "destructive",
         onPress: async () => {
           setEnding(true);
+          console.log("[live] user requested end");
+          /* Phase 30.6: stop native publishing + polling FIRST so donePublish
+           * fires immediately; consult the server afterwards. UI always ends
+           * consistently even if the network request fails. */
+          requestStop("user-end");
           try {
-            console.log("[live] user requested end");
-            requestStop("user-end");
-            try {
-              await sendMobileSignal(streamId, "stopped");
-            } catch {}
+            await sendMobileSignal(streamId, "stopped");
+          } catch {}
+          let serverEnded = false;
+          try {
             await endOwnStream(streamId);
+            serverEnded = true;
           } catch (err) {
-            Alert.alert("Unable to end stream", err?.response?.data?.message || "Try again.");
-            setEnding(false);
+            const status = err?.response?.status;
+            const msg = String(err?.response?.data?.message || "");
+            if (status === 429) {
+              /* Phase 30.6: a 429 here must not strand the user "live" — the
+               * RTMP socket is already down so donePublish will end the stream
+               * server-side. Verify via owner status before failing. */
+              console.log("[live] end request rate-limited (429); verifying server state");
+              try {
+                const check = await getOwnerStatus(streamId);
+                const info = check?.stream || {};
+                if (!check?.live && !info?.isLive) {
+                  finishEndedUi("donePublish already ended the stream (429 verified)");
+                  return;
+                }
+                if (info?.endedAt) {
+                  finishEndedUi("stream already ended (429 verified)");
+                  return;
+                }
+              } catch {}
+              if (mountedRef.current) {
+                setEnding(false);
+                Alert.alert(
+                  "Ending… please retry",
+                  "The server is busy. Your camera has stopped; tap End Live again in a moment to confirm."
+                );
+              }
+              return;
+            }
+            /* Non-429 failure (offline etc.): verify — a donePublish may have
+             * already ended it server-side. */
+            try {
+              const check = await getOwnerStatus(streamId);
+              const info = check?.stream || {};
+              if ((!check?.live && !info?.isLive) || info?.endedAt) {
+                finishEndedUi("server already ended (verified after end-request failure)");
+                return;
+              }
+            } catch {}
+            // Still live server-side: keep the ended-UI (camera off, polling
+            // off) but tell the user to retry the confirm, not that it failed.
+            if (mountedRef.current) {
+              setEnding(false);
+              Alert.alert(
+                "Camera stopped — confirm End Live",
+                `${msg || "The confirm request failed."} Your camera has stopped. Tap End Live again to confirm.`
+              );
+            }
             return;
           }
-          stopTimers();
-          router.replace("/creator-live");
+          if (serverEnded) finishEndedUi("backend confirmed end");
         },
       },
     ]);
@@ -358,13 +480,18 @@ export default function LiveCameraScreen() {
     );
   }
 
-  const pillColor = live ? "#E0245E" : "#141414";
-  const pillLabel = live ? "LIVE" : phase === "connecting" ? "CONNECTING" : "PREVIEW";
+  const pillColor = live ? "#E0245E" : ended ? "#1B7A3D" : "#141414";
+  const pillLabel = live ? "LIVE" : ended || phase === "ended" ? "ENDED" : phase === "connecting" ? "CONNECTING" : "PREVIEW";
+  /* Phase 30.6 render contract: exactly one camera consumer mounted.
+   * preview phase -> CameraView (real pre-live preview, needs only expo-camera
+   * permissions); connecting/live -> NodePublisher (owns the camera). */
+  const showPublisher = publisherActive && capability.available && NodePublisher && hasPermissions;
+  const showPreview = !publisherActive && hasPermissions;
 
   return (
     <View style={styles.container}>
       <View style={styles.cameraWrap}>
-        {capability.available && NodePublisher && hasPermissions ? (
+        {showPublisher ? (
           <>
             {/* Phase 30.5: NO key={frontCamera} — remounting NodePublisher
                 mid-publish kills the RTMP socket (the ~15s "mystery" drop when
@@ -395,24 +522,41 @@ export default function LiveCameraScreen() {
               const msg = event?.nativeEvent?.msg;
               /* Phase 30.5: log every native publisher event/result so a
                * server- or socket-side drop is distinguishable from a
-               * client-initiated stop. Reasons are first-wins via requestStop. */
+               * client-initiated stop. Reasons are first-wins via requestStop.
+               * Phase 30.6: native text is SANITIZED — it may embed the full
+               * publish URL/key (the screenshot leak). */
               if (msg && typeof msg === "string") {
-                console.log(`[live] native publisher event: ${msg}`);
+                const safe = sanitizePublishError(msg);
+                console.log(`[live] native publisher event: ${safe}`);
                 if (/fail|error|denied|disconnect|close/i.test(msg)) {
-                  if (mountedRef.current) setError(`Publish error: ${msg}`);
-                  requestStop(`native-event:${msg.slice(0, 80)}`);
+                  if (mountedRef.current) setError(`Publish error: ${safe}`);
+                  requestStop(`native-event:${safe.slice(0, 80)}`);
                 }
               }
             }}
           />
           </>
+        ) : showPreview ? (
+          /* Phase 30.6: real pre-live camera preview. expo-camera owns the
+           * camera here; it unmounts before NodePublisher mounts on Start Live
+           * so the two never compete. Flip/mute mirror the publisher props. */
+          <CameraView
+            style={styles.camera}
+            facing={frontCamera ? "front" : "back"}
+            mirror={frontCamera}
+            mode="video"
+          />
         ) : (
           <View style={[styles.camera, styles.cameraFallback]}>
             <Text style={styles.fallbackTitle}>
-              {!hasPermissions ? "Camera and mic needed" : "Development build required"}
+              {!hasPermissions ? "Camera and mic needed" : ended ? "Stream ended" : "Development build required"}
             </Text>
             <Text style={styles.fallbackText}>
-              {!hasPermissions ? "Grant camera and mic access to preview." : capability.reason}
+              {!hasPermissions
+                ? "Grant camera and mic access to preview."
+                : ended
+                  ? "Your broadcast has ended. Create a new stream to go live again."
+                  : capability.reason}
             </Text>
             {!hasPermissions && (
               <TouchableOpacity

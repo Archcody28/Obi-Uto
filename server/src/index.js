@@ -154,15 +154,35 @@ app.use("/api/payments", paymentLimiter);
 // Phase 30.3: live polling endpoints carry their own dedicated limiter
 // (livePollLimiter on the route). Exempt them from the shared 100/15min
 // apiLimiter so studio polling can never exhaust the global API budget.
-const LIVE_POLL_PREFIXES = [
-  "/api/live-streams/mine",
-  "/api/live-streams/status/",
-  "/api/live-streams/mobile-signal/",
+// Phase 30.6: same for explicit creator-action endpoints (liveActionLimiter
+// on the route) so End Live can never 429 after a long broadcast. NOTE:
+// inside app.use("/api") Express strips the mount point, so req.path is
+// "/live-streams/..." (no "/api" prefix) — match originalUrl too so the
+// exemption actually fires (previously the "/api/..." prefixes never matched).
+const LIVE_EXEMPT_PREFIXES = [
+  "/live-streams/mine",
+  "/live-streams/status/",
+  "/live-streams/mobile-signal/",
+  "/live-streams/ingest/",
+  "/live-streams/start/",
+  "/live-streams/end/",
 ];
 app.use("/api", (req, res, next) => {
   try {
-    if (LIVE_POLL_PREFIXES.some((p) => req.path === p || req.path.startsWith(p))) {
+    const paths = [req.path, req.originalUrl ? req.originalUrl.split("?")[0] : ""];
+    if (paths.some((p) => p && LIVE_EXEMPT_PREFIXES.some((pre) =>
+      pre.endsWith("/") ? (p === pre.slice(0, -1) || p.startsWith(pre) || p.startsWith(`/api${pre}`)) : (p === pre || p.startsWith(`${pre}/`) || p === `/api${pre}` || p.startsWith(`/api${pre}/`))
+    ))) {
       return next();
+    }
+    // Exact create/schedule/patch roots have no trailing id segment.
+    if (paths.some((p) => p === "/live-streams" || p === "/api/live-streams" ||
+      p === "/live-streams/schedule" || p === "/api/live-streams/schedule" ||
+      (p.startsWith("/live-streams/") && /^\/live-streams\/[^/]+$/.test(p)) ||
+      (p.startsWith("/api/live-streams/") && /^\/api\/live-streams\/[^/]+$/.test(p)))) {
+      const method = String(req.method || "").toUpperCase();
+      // Only exempt the write/action verbs; public GET discovery keeps shared budget.
+      if (method === "POST" || method === "PUT" || method === "PATCH") return next();
     }
   } catch (_err) { /* fall through to shared limiter */ }
   return apiLimiter(req, res, next);

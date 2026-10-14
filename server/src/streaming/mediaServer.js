@@ -142,10 +142,17 @@ nms.on("prePublish", async (first, second) => {
     rejectSession(session);
     return;
   }
+/* Phase 30.6: ended streams can never be republished with their old key.
+ * prePublish accepts a key ONLY when its owning document is not ended
+ * (no endedAt). An ended stream's key is dead — the creator must create a
+ * new stream (new key) to go live again. */
   try {
-    const exists = await LiveStream.exists({ streamKey });
-    if (!exists) {
+    const existing = await LiveStream.findOne({ streamKey }).select("_id endedAt");
+    if (!existing) {
       console.warn(`[live] prePublish: unknown stream key ${redactKey(streamKey)}; publisher rejected`);
+      rejectSession(session);
+    } else if (existing.endedAt) {
+      console.warn(`[live] prePublish: key ${redactKey(streamKey)} belongs to ended stream ${existing._id}; republish rejected`);
       rejectSession(session);
     } else {
       console.log(`[live] prePublish: key ${redactKey(streamKey)} accepted; awaiting postPublish`);
@@ -169,9 +176,16 @@ nms.on("postPublish", async (first, second) => {
       console.warn(`[live] postPublish: unknown stream key ${redactKey(streamKey)}; no document updated`);
       return;
     }
+    /* Phase 30.6: an ended stream's key is dead — a late/duplicate publisher
+     * attaching with it must NEVER resurrect the stream. */
+    if (stream.endedAt) {
+      console.warn(`[live] postPublish: key ${redactKey(streamKey)} belongs to ended stream ${stream._id}; ignoring (key retired)`);
+      rejectSession(null);
+      return;
+    }
 
     const result = await LiveStream.updateOne(
-      { _id: stream._id },
+      { _id: stream._id, endedAt: null },
       {
         $set: {
           isLive: true,

@@ -25,7 +25,7 @@ const {
 } = require("../controllers/liveStreamController");
 
 const authMiddleware = require("../middleware/authMiddleware");
-const { livePollLimiter } = require("../middleware/rateLimitMiddleware");
+const { livePollLimiter, liveActionLimiter } = require("../middleware/rateLimitMiddleware");
 
 const router = express.Router();
 
@@ -34,16 +34,19 @@ router.get("/live", getLiveStreams);
 router.get("/discover", getDiscovery);
 
 /* Phase 30.3: polling endpoints get the dedicated high-frequency budget
- * (300/min) instead of consuming the shared 100/15min apiLimiter budget. */
+ * (300/min) instead of consuming the shared 100/15min apiLimiter budget.
+ * Phase 30.6: explicit one-shot creator actions (ingest/create/schedule/
+ * start/end/update) get liveActionLimiter (60/min) so taps can never 429
+ * after a long broadcast drained polling budgets. Global limits untouched. */
 router.get("/mine", authMiddleware, livePollLimiter, getMyStreams);
-router.get("/ingest/:id", authMiddleware, getIngestInfo);
+router.get("/ingest/:id", liveActionLimiter, authMiddleware, getIngestInfo);
 router.get("/status/:id", authMiddleware, livePollLimiter, getOwnerStatus);
 router.post("/mobile-signal/:id", authMiddleware, livePollLimiter, mobileSignal);
-router.post("/", authMiddleware, createStream);
-router.post("/schedule", authMiddleware, scheduleStream);
-router.put("/start/:id", authMiddleware, startStream);
-router.put("/end/:id", authMiddleware, endStream);
-router.patch("/:id", authMiddleware, updateStream);
+router.post("/", liveActionLimiter, authMiddleware, createStream);
+router.post("/schedule", liveActionLimiter, authMiddleware, scheduleStream);
+router.put("/start/:id", liveActionLimiter, authMiddleware, startStream);
+router.put("/end/:id", liveActionLimiter, authMiddleware, endStream);
+router.patch("/:id", liveActionLimiter, authMiddleware, updateStream);
 
 /* Public single-stream view. Must stay last so it cannot shadow the
  * literal routes above. */

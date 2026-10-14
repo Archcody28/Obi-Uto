@@ -9,7 +9,8 @@
  *   postPublish flips live -> heartbeat keeps the mobile session fresh ->
  *   End Live (stop publish + PUT /end/:id).
  * - "ended" is authoritative once endedAt is set; a stream cannot go back
- *   to live without a new publisher attaching (postPublish allows restart).
+ *   to live. postPublish on an ended stream's key is ignored (the key is
+ *   dead); the creator must create a new stream (new key) to broadcast again.
  * - Stale mobile sessions (heartbeat lost) are swept to ended so discovery
  *   never shows ghost live streams.
  *
