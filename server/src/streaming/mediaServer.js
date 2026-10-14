@@ -18,6 +18,12 @@ const LiveStream = require("../models/LiveStream");
 const uploadRecordedVideo = require("../utils/uploadRecordedVideo");
 const { finalizeRecording } = require("./recordingProcessor");
 const { getIngestInfo } = require("./streamConfig");
+const {
+  startPackaging,
+  stopPackaging,
+  stopAll,
+  isPlaybackReady,
+} = require("./hlsPackager");
 
 const ingest = getIngestInfo();
 
@@ -192,12 +198,38 @@ nms.on("postPublish", async (first, second) => {
           startedAt: stream.startedAt || new Date(),
           endedAt: null,
           playbackUrl: `${ingest.mediaBaseUrl}/live/${streamKey}/index.m3u8`,
+          playbackStatus: ingest.ffmpegReady ? "preparing" : "failed",
+          playbackError: ingest.ffmpegReady
+            ? ""
+            : "FFmpeg unavailable — viewers cannot watch until FFmpeg is installed.",
           publisherHeartbeatAt: new Date(),
           mobileSessionActive: stream.publisherSource === "mobile" ? true : stream.mobileSessionActive,
           publisherSource: stream.publisherSource === "mobile" ? "mobile" : "external",
         },
       }
     );
+
+    /* Phase 31: start real HLS packaging now that ingest is attached.
+     * Failure is recorded honestly (playbackStatus=failed) — never fake. */
+    if (ingest.ffmpegReady) {
+      const started = startPackaging({
+        streamKey,
+        mediaRoot,
+        ffmpegPath: ingest.ffmpegPath,
+      });
+      if (!started.started && !started.alreadyRunning) {
+        await LiveStream.updateOne(
+          { _id: stream._id },
+          {
+            $set: {
+              playbackStatus: "failed",
+              playbackError: `HLS packaging failed to start (${started.reason}).`,
+            },
+          }
+        );
+        console.warn(`[live][hls] packaging failed to start ...${redactKey(streamKey)}: ${started.reason}`);
+      }
+    }
 
     console.log(`[live] LIVE: ${stream.title} (${stream._id}); key ${redactKey(streamKey)} matched=${result.matchedCount} modified=${result.modifiedCount}`);
   } catch (err) {
@@ -223,12 +255,17 @@ nms.on("donePublish", async (first, second) => {
           endedAt: new Date(),
           viewers: 0,
           mobileSessionActive: false,
+          playbackStatus: "ended",
         },
       },
       { new: true }
     );
 
     if (!stream) return;
+
+    /* Phase 31: stop this stream's packager only (never another stream's).
+     * The key is retired on donePublish, so remove its HLS files. */
+    stopPackaging(streamKey, { removeFiles: true });
 
     /* Phase 30.5: attribute the drop — donePublish with a still-fresh
      * heartbeat means the socket died underneath a healthy session
@@ -269,6 +306,7 @@ nms.on("donePublish", async (first, second) => {
  * discovery and viewers never see ghost live streams.
  */
 async function reconcileStaleLiveStreams() {
+  stopAll();
   const result = await LiveStream.updateMany(
     { isLive: true },
     {
@@ -277,6 +315,7 @@ async function reconcileStaleLiveStreams() {
         endedAt: new Date(),
         viewers: 0,
         mobileSessionActive: false,
+        playbackStatus: "ended",
       },
     }
   );
@@ -313,8 +352,56 @@ scheduleReconciliation();
 
 module.exports = nms;
 module.exports.reconcileStaleLiveStreams = reconcileStaleLiveStreams;
+module.exports.mediaRoot = mediaRoot;
+module.exports.ingestInfo = ingest;
+module.exports.isPlaybackReady = (streamKey) => isPlaybackReady(mediaRoot, streamKey);
+module.exports.playbackPath = (streamKey) =>
+  require("./hlsPackager").playlistPath(mediaRoot, streamKey);
+module.exports.stopPackaging = stopPackaging;
 /* Phase 30.4: parser/test seam (no secrets). */
 module.exports.resolveStreamPath = resolveStreamPath;
 module.exports.extractStreamKey = extractStreamKey;
 module.exports.redactKey = redactKey;
 module.exports.rejectSession = rejectSession;
+
+/* Phase 31: graceful shutdown stops packagers (never orphan ffmpeg). */
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  try {
+    process.on(sig, () => {
+      try { stopAll(); } catch (_e) { /* ignore */ }
+    });
+  } catch (_e) { /* ignore */ }
+}
+
+/* Phase 31: honest playback state for the readiness endpoint.
+ * Never marks playable unless playlist + segments exist on disk. */
+function getPlaybackState(stream) {
+  const out = {
+    playbackStatus: stream.playbackStatus || "preparing",
+    playbackError: stream.playbackError || "",
+    playbackReady: false,
+  };
+  if (stream.endedAt || stream.playbackStatus === "ended") {
+    out.playbackStatus = "ended";
+    out.playbackError = "";
+    return out;
+  }
+  if (!stream.isLive) return out;
+  if (stream.playbackStatus === "failed") return out;
+  const probe = isPlaybackReady(mediaRoot, stream.streamKey);
+  out.playbackReady = probe.ready;
+  if (probe.ready) {
+    out.playbackStatus = "playable";
+    if (stream.playbackStatus !== "playable") {
+      LiveStream.updateOne(
+        { _id: stream._id },
+        { $set: { playbackStatus: "playable" } }
+      ).catch(() => {});
+    }
+  } else {
+    out.playbackStatus = "preparing";
+  }
+  return out;
+}
+
+module.exports.getPlaybackState = getPlaybackState;

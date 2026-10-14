@@ -22,6 +22,7 @@ const {
   updateStream,
   mobileSignal,
   getOwnerStatus,
+  getPlayback,
 } = require("../controllers/liveStreamController");
 
 const authMiddleware = require("../middleware/authMiddleware");
@@ -32,6 +33,8 @@ const router = express.Router();
 /* Public discovery/list (no auth required, no secrets returned). */
 router.get("/live", getLiveStreams);
 router.get("/discover", getDiscovery);
+/* Phase 31: honest viewer playback probe (public, polled by the player). */
+router.get("/playback/:id", livePollLimiter, getPlayback);
 
 /* Phase 30.3: polling endpoints get the dedicated high-frequency budget
  * (300/min) instead of consuming the shared 100/15min apiLimiter budget.

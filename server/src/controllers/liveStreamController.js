@@ -200,18 +200,39 @@ exports.scheduleStream = async (req, res) => {
 };
 
 /*
+ * Phase 31 — attach honest playback state to a sanitized public stream.
+ * Needs the full document (streamKey lives server-side) — callers fetch
+ * without the -streamKey projection, then this strips secrets for output.
+ */
+function withPlaybackState(streamDoc) {
+  const obj = sanitizeStream(streamDoc);
+  try {
+    const { getPlaybackState } = require("../streaming/mediaServer");
+    const state = getPlaybackState(streamDoc);
+    obj.playbackStatus = state.playbackStatus;
+    obj.playbackError = state.playbackError;
+    obj.playbackReady = state.playbackReady;
+  } catch (_e) {
+    obj.playbackStatus = obj.playbackStatus || "preparing";
+    obj.playbackError = obj.playbackError || "";
+    obj.playbackReady = false;
+  }
+  return obj;
+}
+
+/*
  * GET /api/live-streams/live
  * Public list of live streams. Stream keys are never included.
  */
 exports.getLiveStreams = async (req, res) => {
   try {
     const streams = await LiveStream.find({ isLive: true })
-      .select("-streamKey -notifyUsers")
+      .select("-notifyUsers")
       .populate("creatorId", CREATOR_PUBLIC_FIELDS)
       .sort({ viewers: -1 })
       .limit(50);
 
-    res.json(sanitizeStreams(streams));
+    res.json(streams.map(withPlaybackState));
   } catch (err) {
     console.error("getLiveStreams error:", err.message);
     sendError(res, 500, "Failed to load live streams");
@@ -228,7 +249,7 @@ exports.getDiscovery = async (req, res) => {
 
     const [live, upcoming] = await Promise.all([
       LiveStream.find({ isLive: true })
-        .select("-streamKey -notifyUsers")
+        .select("-notifyUsers")
         .populate("creatorId", CREATOR_PUBLIC_FIELDS)
         .sort({ viewers: -1 })
         .limit(20),
@@ -237,15 +258,15 @@ exports.getDiscovery = async (req, res) => {
         isLive: false,
         scheduledFor: { $gt: now },
       })
-        .select("-streamKey -notifyUsers")
+        .select("-notifyUsers")
         .populate("creatorId", CREATOR_PUBLIC_FIELDS)
         .sort({ scheduledFor: 1 })
         .limit(20),
     ]);
 
     res.json({
-      live: sanitizeStreams(live),
-      upcoming: sanitizeStreams(upcoming),
+      live: live.map(withPlaybackState),
+      upcoming: upcoming.map(withPlaybackState),
     });
   } catch (err) {
     console.error("getDiscovery error:", err.message);
@@ -264,14 +285,14 @@ exports.getStream = async (req, res) => {
     }
 
     const stream = await LiveStream.findById(req.params.id)
-      .select("-streamKey -notifyUsers")
+      .select("-notifyUsers")
       .populate("creatorId", CREATOR_PUBLIC_FIELDS);
 
     if (!stream) {
       return sendError(res, 404, "Stream not found");
     }
 
-    res.json(sanitizeStream(stream));
+    res.json(withPlaybackState(stream));
   } catch (err) {
     console.error("getStream error:", err.message);
     sendError(res, 500, "Failed to load stream");
@@ -446,10 +467,23 @@ exports.endStream = async (req, res) => {
           endedAt: new Date(),
           viewers: 0,
           mobileSessionActive: false,
+          playbackStatus: "ended",
+          playbackError: "",
         },
       },
       { new: true }
     );
+
+    /* Phase 31: End Live stops this stream's packager and removes its HLS
+     * files so viewers get the ended state and no ffmpeg is orphaned. */
+    try {
+      const { stopPackaging } = require("../streaming/hlsPackager");
+      stopPackaging(loaded.stream.streamKey, { removeFiles: true });
+    } catch (_e) { /* ignore */ }
+    try {
+      const { notifyStreamEnded } = require("../socket");
+      notifyStreamEnded(String(stream._id));
+    } catch (_e) { /* socket unavailable — safe to skip */ }
 
     res.json({ success: true, stream: creatorStreamPayload(stream) });
   } catch (err) {
@@ -526,23 +560,65 @@ exports.getOwnerStatus = async (req, res) => {
   }
 };
 
+/*
+ * GET /api/live-streams/playback/:id (public, no auth)
+ * Honest viewer playback probe: preparing | playable | failed | ended.
+ * playable ONLY when the HLS playlist + a segment exist on disk.
+ */
+exports.getPlayback = async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) {
+      return sendError(res, 400, "Invalid stream id");
+    }
+    const stream = await LiveStream.findById(req.params.id).select("-notifyUsers");
+    if (!stream) return sendError(res, 404, "Stream not found");
+    const pub = withPlaybackState(stream);
+    return res.json({
+      streamId: String(stream._id),
+      isLive: Boolean(stream.isLive),
+      ended: Boolean(stream.endedAt),
+      playbackStatus: pub.playbackStatus,
+      playbackReady: Boolean(pub.playbackReady),
+      playbackError: pub.playbackError || "",
+      playbackUrl: stream.playbackUrl || "",
+      viewers: stream.viewers || 0,
+    });
+  } catch (err) {
+    console.error("getPlayback error:", err.message);
+    sendError(res, 500, "Failed to load playback status");
+  }
+};
+
 /* Phase 30 — stale mobile session recovery (sweeper + boot reconciliation). */
 async function sweepStaleMobileSessions(now = new Date()) {
   const cutoff = new Date(now.getTime() - MOBILE_HEARTBEAT_TIMEOUT_MS);
+  /* Phase 31: collect keys first so swept streams stop their packagers. */
+  const stale = await LiveStream.find({
+    isLive: true,
+    publisherSource: "mobile",
+    mobileSessionActive: true,
+    $or: [
+      { publisherHeartbeatAt: null },
+      { publisherHeartbeatAt: { $lt: cutoff } },
+    ],
+  }).select("_id streamKey");
   const result = await LiveStream.updateMany(
     {
-      isLive: true,
-      publisherSource: "mobile",
-      mobileSessionActive: true,
-      $or: [
-        { publisherHeartbeatAt: null },
-        { publisherHeartbeatAt: { $lt: cutoff } },
-      ],
+      _id: { $in: stale.map((s) => s._id) },
     },
     {
-      $set: { isLive: false, endedAt: now, viewers: 0, mobileSessionActive: false },
+      $set: {
+        isLive: false, endedAt: now, viewers: 0, mobileSessionActive: false,
+        playbackStatus: "ended", playbackError: "",
+      },
     }
   );
+  if (stale.length) {
+    try {
+      const { stopPackaging } = require("../streaming/hlsPackager");
+      for (const s of stale) stopPackaging(s.streamKey, { removeFiles: true });
+    } catch (_e) { /* ignore */ }
+  }
   return result.modifiedCount || 0;
 }
 

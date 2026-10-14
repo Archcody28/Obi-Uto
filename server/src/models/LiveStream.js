@@ -38,6 +38,18 @@ const liveStreamSchema =
 
       playbackUrl: String,
 
+      /* Phase 31 — honest HLS packaging state (safe for public queries). */
+      playbackStatus: {
+        type: String,
+        enum: ["preparing", "playable", "failed", "ended"],
+        default: "preparing",
+      },
+
+      playbackError: {
+        type: String,
+        default: "",
+      },
+
       scheduledFor: Date,
 
       startedAt: Date,

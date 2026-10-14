@@ -63,6 +63,7 @@ import {
 
 import {
   getStream as getLiveStreamApi,
+  getPlayback as getLivePlaybackApi,
 } from "../api/liveStreamApi";
 
 import {
@@ -198,6 +199,11 @@ export default function PlayerScreen() {
   const [liveInfo, setLiveInfo] = useState<any>(null);
   const [liveEnded, setLiveEnded] = useState(false);
   const [liveWaiting, setLiveWaiting] = useState(false);
+  /* Phase 31 — honest HLS readiness (preparing/playable/failed/ended).
+   * The player never mounts before playbackStatus=playable + playbackReady. */
+  const [livePlayback, setLivePlayback] = useState<any>(null);
+  const [livePlayerError, setLivePlayerError] = useState("");
+  const [liveRetrying, setLiveRetrying] = useState(false);
   const [following, setFollowing] = useState<boolean | null>(null);
   const [followBusy, setFollowBusy] = useState(false);
 
@@ -210,12 +216,26 @@ export default function PlayerScreen() {
 
     const refresh = async () => {
       try {
-        const info = await getLiveStreamApi(streamId);
+        const [info, playback] = await Promise.all([
+          getLiveStreamApi(streamId),
+          getLivePlaybackApi(streamId).catch(() => null),
+        ]);
         if (!alive || !mountedRef.current) return;
 
         setLiveInfo(info);
         setLiveEnded(!info?.isLive && !!info?.endedAt);
         setLiveWaiting(!info?.isLive && !info?.endedAt);
+        if (playback) {
+          setLivePlayback(playback);
+          /* Trust server playbackStatus; fall back to stream doc fields. */
+          const status = playback.playbackStatus || info?.playbackStatus;
+          if (status === "ended" || playback.ended) setLiveEnded(true);
+          setLivePlayerError(
+            status === "failed"
+              ? String(playback.playbackError || info?.playbackError || "Live playback failed to start.")
+              : ""
+          );
+        }
       } catch (err) {
         // A live stream that 404s is treated as ended, not as a crash.
         if (alive && mountedRef.current) {
@@ -992,6 +1012,96 @@ export default function PlayerScreen() {
     }
   };
 
+  const liveStatus: string =
+    livePlayback?.playbackStatus || liveInfo?.playbackStatus || "";
+  const liveReady: boolean = Boolean(
+    livePlayback?.playbackReady ?? liveInfo?.playbackReady ?? false
+  );
+  /* Gate the actual player: only a playable + ready stream mounts video.
+   * Everything else shows preparing/failed/ended honestly with live chat.
+   * (Gated on onlineVideoUrl — the plain navigation param — not videoSource,
+   * which derives from a render-time ref read elsewhere in this file.) */
+  const livePlayable: boolean = Boolean(
+    isLive && onlineVideoUrl && !liveEnded && liveStatus === "playable" && liveReady
+  );
+  const liveFailed: boolean = Boolean(
+    isLive && !liveEnded && (liveStatus === "failed" || !!livePlayerError)
+  );
+
+  /* Phase 31: live streams that are preparing/failed (or ended mid-watch)
+   * never mount a fake player. Preparing shows buffering copy, failed shows
+   * the honest error + retry, and chat stays live in both states. */
+  if (isLive && onlineVideoUrl && !livePlayable) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.liveStateBox}>
+          <Text style={styles.liveStateTitle}>
+            {liveEnded || liveStatus === "ended"
+              ? "This live stream has ended"
+              : liveFailed
+                ? "Live playback unavailable"
+                : liveWaiting
+                  ? "The broadcast hasn't started yet"
+                  : "Preparing live video..."}
+          </Text>
+
+          <Text style={styles.liveStateText}>
+            {liveEnded || liveStatus === "ended"
+              ? "Thanks for watching. Check out more live streams soon."
+              : liveFailed
+                ? (livePlayerError || "The broadcast connected but video packaging failed. Try again shortly.")
+                : liveWaiting
+                  ? "The creator is setting up. This screen will start playing automatically once the broadcast begins."
+                  : "The broadcast is connected. Video starts automatically once segments are ready."}
+          </Text>
+
+          {liveFailed && (
+            <TouchableOpacity
+              style={styles.retryButton}
+              activeOpacity={0.8}
+              disabled={liveRetrying}
+              onPress={async () => {
+                setLiveRetrying(true);
+                try {
+                  const playback = await getLivePlaybackApi(streamId);
+                  setLivePlayback(playback);
+                  const status = playback?.playbackStatus;
+                  if (status === "ended") setLiveEnded(true);
+                  setLivePlayerError(
+                    status === "failed"
+                      ? String(playback?.playbackError || "Live playback failed to start.")
+                      : ""
+                  );
+                } catch {
+                  /* keep honest failed state; next poll retries */
+                } finally {
+                  setLiveRetrying(false);
+                }
+              }}
+            >
+              <Text style={styles.retryButtonText}>
+                {liveRetrying ? "Retrying..." : "Retry"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {streamId && (
+          <View style={styles.chatPanel}>
+            <LiveChatScreen
+              streamId={streamId}
+              scrollEnabled={false}
+              stream={{
+                _id: streamId,
+                creatorId,
+              }}
+            />
+          </View>
+        )}
+      </View>
+    );
+  }
+
   if (!videoSource) {
     /*
      * Live streams without a playback URL yet: the broadcast has not
@@ -1357,6 +1467,20 @@ const styles =
     liveStateText: {
       color: AppTheme.colors.textMuted,
       lineHeight: 20,
+    },
+
+    retryButton: {
+      marginTop: 14,
+      alignSelf: "flex-start",
+      backgroundColor: AppTheme.colors.accent,
+      borderRadius: AppTheme.radius.sm,
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+    },
+
+    retryButtonText: {
+      color: "#FFFFFF",
+      fontWeight: "800",
     },
 
     liveHeader: {

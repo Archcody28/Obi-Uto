@@ -143,7 +143,9 @@ async function main() {
     ""
   );
 
-  /* Static: public queries must project streamKey out. */
+  /* Static: public queries must not leak streamKey — either by projecting it
+   * out OR via withPlaybackState (Phase 31), which sanitizeStream-strips the
+   * key after using it server-side for the readiness probe. */
   const ctlSrc = fs.readFileSync(
     path.join(ROOT, "server", "src", "controllers", "liveStreamController.js"),
     "utf8"
@@ -154,7 +156,7 @@ async function main() {
     const body = ctlSrc.slice(idx, idx + 1200);
     record(
       `public handler ${handler} excludes streamKey projection`,
-      body.includes("-streamKey"),
+      body.includes("-streamKey") || body.includes("withPlaybackState"),
       ""
     );
   }

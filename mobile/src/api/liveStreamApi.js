@@ -51,6 +51,17 @@ export const getStream =
     return res.data;
   };
 
+/* Phase 31 — honest viewer playback probe (preparing/playable/failed/ended).
+ * Public; playable only when the HLS playlist + segments exist server-side. */
+export const getPlayback =
+  async (streamId) => {
+    const res = await client.get(
+      `/live-streams/playback/${streamId}`
+    );
+
+    return res.data;
+  };
+
 /* Creator's own streams (includes streamKey + ingest setup). */
 export const getMyStreams =
   async () => {
