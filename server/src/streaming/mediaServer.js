@@ -17,7 +17,7 @@ const Media = require("../models/Media");
 const LiveStream = require("../models/LiveStream");
 const uploadRecordedVideo = require("../utils/uploadRecordedVideo");
 const { finalizeRecording } = require("./recordingProcessor");
-const { getIngestInfo } = require("./streamConfig");
+const { getIngestInfo, resolveHlsBaseUrl } = require("./streamConfig");
 const {
   startPackaging,
   stopPackaging,
@@ -97,23 +97,15 @@ function startHlsStaticServer() {
   }
   return hlsStaticServer;
 }
-/* Phase 31.1: HLS base URL — the static server lives on MEDIA_PORT+1.
- * MEDIA_BASE_URL historically pointed at the NMS FLV port (:8000), which
- * never served m3u8/TS, so every LAN playback URL 404'd. Derive the HLS
- * port from the configured base (bump trailing :8000 -> :8001, else
- * append the offset port) so stored playbackUrl values are fetchable.
+/* Phase 31.1: HLS base URL — dev/LAN serves from the static server on
+ * MEDIA_PORT+1 (bump an explicit :8000 -> :8001). Phase 33: a portless
+ * public URL (e.g. a Railway HTTPS domain) is NEVER given an internal
+ * port — the main Express API serves /live on the public domain itself.
  * The RTMP ingest key is never embedded anywhere else — playback URLs
  * carry only the path; the key stays server-side. */
 function hlsBaseUrl() {
-  const base = String(ingest.mediaBaseUrl || "").replace(/\/+$/, "");
-  const m = base.match(/^(https?:\/\/[^/:]+)(?::(\d+))?(\/.*)?$/i);
-  if (!m) return base;
-  const [, origin, port, rest] = m;
   const mediaPort = Number(process.env.MEDIA_PORT) || 8000;
-  const hlsPort = mediaPort + HLS_PORT_OFFSET;
-  if (port && Number(port) === mediaPort) return `${origin}:${hlsPort}${rest || ""}`;
-  if (!port) return `${origin}:${hlsPort}${rest || ""}`;
-  return base;
+  return resolveHlsBaseUrl(ingest.mediaBaseUrl, mediaPort);
 }
 /* NOTE: startHlsStaticServer is exported at the bottom with the other
  * exports (after `nms` exists) — do NOT export here; `module.exports = nms`
@@ -145,6 +137,11 @@ const trans = ingest.ffmpegPath
  * external packager — postPublish advertises the playback URL template,
  * but no segments exist until one is wired. */
 const config = {
+  /* Phase 33: bind interface for RTMP (+NMS HTTP) made explicit so RTMP
+   * ingest listens on 0.0.0.0:1935 inside the container — reachable by a
+   * Railway TCP proxy (loopback-only would make proxying impossible).
+   * Override with MEDIA_BIND only for specialised local setups. */
+  bind: process.env.MEDIA_BIND || "0.0.0.0",
   rtmp: {
     port: Number(process.env.RTMP_PORT) || 1935,
     chunk_size: 60000,

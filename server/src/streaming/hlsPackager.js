@@ -43,7 +43,13 @@ function buildArgs({ ffmpegInput, outDir, playlist }) {
     "-f", "hls", "-hls_time", "2", "-hls_list_size", "6",
     "-hls_flags", "delete_segments+append_list+independent_segments",
     "-hls_segment_filename", path.join(outDir, "seg-%05d.ts"),
-    "-master_pl_name", "index.m3u8",
+    /* Phase 33: NEVER pass -master_pl_name here — it was set to the same
+     * path as the output playlist (index.m3u8), so ffmpeg treated that path
+     * as BOTH master and variant: the file becomes a self-referential
+     * #EXT-X-STREAM-INF playlist (measured in 29 of 30 polls while live), no
+     * #EXTINF ever persists, isPlaybackReady fails and players error out.
+     * A single-variant stream needs no master playlist — the media playlist
+     * IS index.m3u8 (what readiness probes and HLS players consume). */
     playlist,
   ];
 }
