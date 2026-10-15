@@ -106,6 +106,41 @@ export function loadNodePublisher() {
   }
 }
 
+/* Phase 31.1 — license registration (legitimate config only, never secrets).
+ * NodeMedia's native publisher ships with LICENSE_KEY = "" and documents
+ * contacting nodemedia.cn for per-platform codes. Without a key the SDK
+ * still connects audio (AAC) but drops/never starts the H264 track — exactly
+ * the field finding (FFprobe: AAC only). Wire the documented setLicense()
+ * path so operators CAN register keys via env/app config:
+ *   EXPO_PUBLIC_NODEMEDIA_ANDROID_LICENSE / EXPO_PUBLIC_NODEMEDIA_IOS_LICENSE
+ * or app.json extra. No key is hardcoded or committed — when unset this is
+ * a no-op and the UI surfaces the honest audio-only risk. */
+export function registerNodeMediaLicense() {
+  try {
+    if (isExpoGo()) return { registered: false, reason: "expo-go" };
+    // eslint-disable-next-line
+    const mod = require("expo-nodemediaclient");
+    const NodeMediaClient = mod?.NodeMediaClient || mod?.default?.NodeMediaClient || null;
+    if (!NodeMediaClient || typeof NodeMediaClient.setLicense !== "function") {
+      return { registered: false, reason: "no-setLicense" };
+    }
+    const { Platform } = require("react-native");
+    let key = "";
+    try {
+      const Constants = require("expo-constants").default || require("expo-constants");
+      const extra = Constants?.expoConfig?.extra || Constants?.manifest?.extra || {};
+      key = Platform.OS === "ios"
+        ? (process.env.EXPO_PUBLIC_NODEMEDIA_IOS_LICENSE || extra.nodeMediaIosLicense || "")
+        : (process.env.EXPO_PUBLIC_NODEMEDIA_ANDROID_LICENSE || extra.nodeMediaAndroidLicense || "");
+    } catch { key = ""; }
+    if (!key) return { registered: false, reason: "no-license-configured" };
+    NodeMediaClient.setLicense(String(key));
+    return { registered: true, reason: "" };
+  } catch (err) {
+    return { registered: false, reason: (err && err.message) || "license-failed" };
+  }
+}
+
 /* RTMP publish URL: server URL + /live/ + stream key (never shown to user).
  * Phase 30.3: strip a stale "/live" suffix from the configured base so the
  * phone builds rtmp://host:1935/live/<key> exactly once. The physical phone

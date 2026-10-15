@@ -112,7 +112,15 @@ function getIngestInfo(env = process.env, existsSync = fs.existsSync) {
   }
 
   const rtmpUrl = resolveRtmpUrl(env);
-  const hlsUrlTemplate = mediaBaseUrl ? `${mediaBaseUrl}/live/{streamKey}/index.m3u8` : "";
+  /* Phase 31.1: HLS is served by the dedicated static server on
+   * MEDIA_PORT+1 (NMS :8000 only speaks FLV). Point the template there so
+   * every playbackUrl handed to viewers is actually fetchable. */
+  const mediaPort = Number(env.MEDIA_PORT) || DEFAULT_MEDIA_PORT;
+  const hlsBase = mediaBaseUrl
+    ? String(mediaBaseUrl).replace(/:(\d+)(\/|$)/, (m, p, slash) =>
+        Number(p) === mediaPort ? `:${mediaPort + 1}${slash}` : m)
+    : "";
+  const hlsUrlTemplate = hlsBase ? `${hlsBase}/live/{streamKey}/index.m3u8` : "";
 
   return {
     ready: Boolean(mediaBaseUrl && ffmpegPath),

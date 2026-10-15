@@ -25,12 +25,25 @@ function rtmpPort() {
 function buildArgs({ ffmpegInput, outDir, playlist }) {
   return [
     "-hide_banner", "-loglevel", "warning",
+    /* Phase 31.1: phone RTMP often starts audio-only; the H264 track joins
+     * seconds later once the encoder/camera spins up. Wait for video instead
+     * of locking an audio-only program in the first probe. */
+    "-analyzeduration", "8000000", "-probesize", "8000000",
+    "-fflags", "+igndts+genpts",
+    "-rtmp_live", "live",
     "-i", ffmpegInput,
+    /* Explicit map: keep the FIRST video + FIRST audio when present.
+     * With -vsync/-async handled by the HLS muxer; dropping -map let
+     * ffmpeg pick audio-only when video arrived late (the field finding). */
+    "-map", "0:v:0?", "-map", "0:a:0?",
     "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
-    "-c:a", "aac", "-ar", "44100",
+    "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "3.1",
+    "-r", "30", "-g", "60", "-keyint_min", "60",
+    "-c:a", "aac", "-ar", "44100", "-ac", "1", "-b:a", "64k",
     "-f", "hls", "-hls_time", "2", "-hls_list_size", "6",
-    "-hls_flags", "delete_segments+append_list",
+    "-hls_flags", "delete_segments+append_list+independent_segments",
     "-hls_segment_filename", path.join(outDir, "seg-%05d.ts"),
+    "-master_pl_name", "index.m3u8",
     playlist,
   ];
 }
@@ -52,10 +65,23 @@ function startPackaging(o) {
   const input = "rtmp://127.0.0.1:" + rtmpPort() + "/live/" + streamKey;
   const args = buildArgs({ ffmpegInput: input, outDir, playlist });
   let child = null;
-  try { child = run(ffmpegPath, args, { stdio: "ignore", windowsHide: true }); }
+  /* Phase 31.1: capture ffmpeg stderr (ring buffer) so an audio-only or
+   * failing ingest leaves an actionable diagnostic instead of silence. */
+  const errRing = [];
+  const STDERR_ARGS = ["-hide_banner", "-loglevel", "warning"];
+  const logArgs = Array.isArray(args) ? args.filter((a) => !STDERR_ARGS.includes(a)) : args;
+  try { child = run(ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true }); }
   catch (err) { return { started: false, reason: "spawn-failed" }; }
   if (!child || !child.pid) return { started: false, reason: "spawn-failed" };
-  const entry = { child, status: "starting", error: "", startedAt: new Date(), playlist, outDir };
+  try {
+    if (child.stderr && typeof child.stderr.on === "function") {
+      child.stderr.on("data", (d) => {
+        errRing.push(String(d));
+        if (errRing.length > 20) errRing.shift();
+      });
+    }
+  } catch (_e) { /* ignore */ }
+  const entry = { child, status: "starting", error: "", startedAt: new Date(), playlist, outDir, errRing, ffmpegArgs: logArgs };
   active.set(streamKey, entry);
   log.log("[live][hls] packaging started for ..." + String(streamKey).slice(-4));
   child.on("error", (err) => {
@@ -66,11 +92,28 @@ function startPackaging(o) {
   child.on("exit", (code, signal) => {
     if (active.get(streamKey) === entry && entry.status !== "stopped") {
       entry.status = "failed";
-      entry.error = "ffmpeg exited code=" + code + " signal=" + (signal || "none");
-      log.warn("[live][hls] ffmpeg exited ..." + String(streamKey).slice(-4));
+      const tail = (entry.errRing || []).join("").slice(-500);
+      entry.error = "ffmpeg exited code=" + code + " signal=" + (signal || "none") + (tail ? " :: " + tail : "");
+      log.warn("[live][hls] ffmpeg exited ..." + String(streamKey).slice(-4) + " code=" + code);
     }
   });
   return { started: true };
+}
+function packagingStatus(streamKey) {
+  const e = _activeGet(String(streamKey || ""));
+  if (!e) return null;
+  return { status: e.status, error: e.error, pid: e.child && e.child.pid };
+}
+function _activeGet(k) { return active.get(k); }
+/* Phase 31.1: map a packager failure onto the stream so the creator/viewer
+ * probe reports failed (with an honest, key-free message) instead of
+ * preparing forever while ffmpeg is dead. */
+function describePackagingFailure(streamKey) {
+  const e = _activeGet(String(streamKey || ""));
+  if (!e || e.status !== "failed") return "";
+  const raw = String(e.error || "packager failed");
+  return raw.replace(/rtmp:\/\/\S+/gi, "rtmp://<ingest-host>/live/<key-redacted>")
+    .replace(/\b[0-9a-f]{16,}\b/gi, "<key-redacted>").slice(0, 220);
 }
 function stopPackaging(streamKey, o) {
   const opts = o || {};
@@ -102,11 +145,6 @@ function stopAll(o) {
   for (const k of keys) stopPackaging(k, o);
   return keys.length;
 }
-function packagingStatus(streamKey) {
-  const e = active.get(String(streamKey || ""));
-  if (!e) return null;
-  return { status: e.status, error: e.error, pid: e.child && e.child.pid };
-}
 function isPlaybackReady(mediaRoot, streamKey) {
   if (!mediaRoot || !isValidKey(streamKey)) return { ready: false, reason: "invalid" };
   const dir = streamDir(mediaRoot, streamKey);
@@ -132,5 +170,6 @@ function isPlaybackReady(mediaRoot, streamKey) {
 module.exports = {
   KEY_RE, isValidKey, streamDir, playlistPath, buildArgs,
   startPackaging, stopPackaging, stopAll, packagingStatus,
+  describePackagingFailure,
   isPlaybackReady, _active: active,
 };

@@ -254,6 +254,32 @@ app.get("/", (req, res) => {
     message: "Media Streaming API Running",
   });
 });
+/* Phase 31.1: serve HLS from the CANONICAL media root (same dir the packager
+ * writes) on the main API too, so viewers can fetch playlists/segments via
+ * the LAN IP even if they hit the API port. Correct content types + CORS.
+ * Keys are never exposed — only m3u8/TS bytes. */
+const LIVE_MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(__dirname, "../media");
+app.use("/live", (req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+app.use(
+  "/live",
+  express.static(path.join(LIVE_MEDIA_ROOT, "live"), {
+    fallthrough: true,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith(".m3u8")) {
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      } else if (filePath.endsWith(".ts")) {
+        res.setHeader("Content-Type", "video/mp2t");
+        res.setHeader("Cache-Control", "public, max-age=60");
+      }
+    },
+  })
+);
 app.use(
   "/media",
   express.static(

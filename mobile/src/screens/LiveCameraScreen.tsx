@@ -28,6 +28,7 @@ import {
   describePublishUrl,
   getNativePublishCapability,
   loadNodePublisher,
+  registerNodeMediaLicense,
 } from "../services/livePublishService";
 
 /*
@@ -106,6 +107,20 @@ export default function LiveCameraScreen() {
   }, []);
   const NodePublisher = capability.NodePublisher;
   const publisherRef = useRef(null);
+  /* Phase 31.1: intentional-stop gate. Native `disconnect` events arriving
+   * AFTER requestStop("user-end-live") are normal lifecycle, never errors. */
+  const expectDisconnectRef = useRef(false);
+  const [licenseNote, setLicenseNote] = useState("");
+  useEffect(() => {
+    try {
+      const r = registerNodeMediaLicense();
+      if (r && !r.registered && r.reason === "no-license-configured") {
+        setLicenseNote(
+          "No NodeMedia license configured — if viewers hear audio but see no video, register per-platform license codes (contact nodemedia.cn) via EXPO_PUBLIC_NODEMEDIA_*_LICENSE."
+        );
+      }
+    } catch {}
+  }, []);
   const pollRef = useRef(null);
   const heartbeatRef = useRef(null);
   const mountedRef = useRef(true);
@@ -171,6 +186,7 @@ export default function LiveCameraScreen() {
       return;
     }
     console.log("[live] remote end confirmed while live; stopping publisher");
+    expectDisconnectRef.current = true; // remote end: trailing disconnect is normal
     if (mountedRef.current) {
       setLive(false);
       setPhase("preview");
@@ -333,6 +349,7 @@ export default function LiveCameraScreen() {
       await sendMobileSignal(streamId, "publishing");
       setPhase("connecting");
       stopReasonRef.current = null; // fresh attempt clears the previous stop reason
+      expectDisconnectRef.current = false; // fresh attempt: disconnects are errors again
       /* Phase 30.6: stage the URL, hand camera ownership to the publisher:
        * unmount CameraView first (single setState), start AFTER mount via the
        * publisher-ready effect below. publishUrl lives only in a ref — never
@@ -405,10 +422,14 @@ export default function LiveCameraScreen() {
         onPress: async () => {
           setEnding(true);
           console.log("[live] user requested end");
+          /* Phase 31.1: mark intentional stop BEFORE touching the publisher
+           * so the native disconnect that follows is treated as normal
+           * lifecycle, never as a publishing error. Status stays ENDED. */
+          expectDisconnectRef.current = true;
           /* Phase 30.6: stop native publishing + polling FIRST so donePublish
            * fires immediately; consult the server afterwards. UI always ends
            * consistently even if the network request fails. */
-          requestStop("user-end");
+          requestStop("user-end-live");
           try {
             await sendMobileSignal(streamId, "stopped");
           } catch {}
@@ -504,7 +525,11 @@ export default function LiveCameraScreen() {
             volume={muted ? 0 : 1}
             videoParam={{
               codecid: NodePublisher.NMC_CODEC_ID_H264,
-              profile: NodePublisher.NMC_PROFILE_AUTO,
+              /* Phase 31.1: BASELINE profile — widest HW-encoder support on
+               * Android. PROFILE_AUTO negotiated High on some devices, whose
+               * output ffmpeg/libx264 HLS packaging rejected, surfacing as
+               * audio-only playlists. 720x1280 portrait matches the preview. */
+              profile: NodePublisher.NMC_PROFILE_H264_BASELINE,
               width: 720,
               height: 1280,
               fps: 30,
@@ -512,14 +537,30 @@ export default function LiveCameraScreen() {
             }}
             audioParam={{
               codecid: NodePublisher.NMC_CODEC_ID_AAC,
-              profile: NodePublisher.NMC_PROFILE_AUTO,
+              profile: NodePublisher.NMC_PROFILE_AAC_LC,
               samplingRate: 44100,
               channels: 1,
               bitrate: 64000,
             }}
             videoOrientation={NodePublisher.VIDEO_ORIENTATION_PORTRAIT}
+            keyFrameInterval={2}
+            HWAccelEnable
+            denoiseEnable={false}
             onEventCallback={(event) => {
-              const msg = event?.nativeEvent?.msg;
+              const nativeEvent = event?.nativeEvent;
+              const msg = nativeEvent?.msg;
+              const evt = Number(nativeEvent?.event);
+              /* Phase 31.1: intentional-stop disconnects are NORMAL lifecycle.
+               * Field finding: End Live briefly surfaced a native disconnect
+               * as a publishing error. Gate FIRST — never show errors after
+               * the user (or remote-end) asked for stop. */
+              const msgLower = String(msg || "").toLowerCase();
+              const looksLikeDisconnect =
+                evt === 0 || msgLower.includes("disconnect") || msgLower.includes("stop") || msgLower.includes("close");
+              if (looksLikeDisconnect && (expectDisconnectRef.current || stopReasonRef.current)) {
+                console.log("[live] publisher disconnect after intentional stop (normal lifecycle)");
+                return;
+              }
               /* Phase 30.5: log every native publisher event/result so a
                * server- or socket-side drop is distinguishable from a
                * client-initiated stop. Reasons are first-wins via requestStop.
@@ -592,6 +633,7 @@ export default function LiveCameraScreen() {
         )}
       </View>
       {!!error && <Text style={styles.error}>{error}</Text>}
+      {!!licenseNote && !error && <Text style={styles.hint}>{licenseNote}</Text>}
       <View style={styles.controls}>
         <TouchableOpacity style={styles.controlButton} onPress={() => setFrontCamera((v) => !v)}>
           <Text style={styles.controlText}>Flip</Text>

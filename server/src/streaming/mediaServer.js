@@ -44,8 +44,80 @@ for (const warning of ingest.warnings) {
   if (!warning.startsWith("FFmpeg")) console.warn(`[live] ${warning}`);
 }
 
+/* Phase 31.1: canonical media root — server/media regardless of cwd.
+ * Previously MEDIA_ROOT defaulted to process.cwd()/media, so launching from
+ * the repo root vs server/ split ingest output from the static routes and
+ * produced 404s for playlists that existed on disk. */
+const DEFAULT_MEDIA_ROOT = path.resolve(__dirname, "..", "..", "media");
 const mediaRoot =
-  (process.env.MEDIA_ROOT || path.join(process.cwd(), "media"));
+  (process.env.MEDIA_ROOT || DEFAULT_MEDIA_ROOT);
+
+/* Phase 31.1: HLS static delivery. NMS v4's http server only handles FLV —
+ * it never served the FFmpeg-written m3u8/TS files, so LAN playback 404'd
+ * even though the playlist existed on disk. Serve MEDIA_ROOT/live on
+ * MEDIA_PORT+1 via express with correct HLS/TS content types and CORS.
+ * Binds 0.0.0.0 so phone LAN URLs reach it. Serves HLS files only. */
+const HLS_PORT_OFFSET = 1;
+let hlsStaticServer = null;
+function startHlsStaticServer() {
+  if (hlsStaticServer) return hlsStaticServer;
+  try {
+    const express = require("express");
+    const app = express();
+    app.use((req, res, next) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+      if (req.method === "OPTIONS") return res.sendStatus(204);
+      next();
+    });
+    app.use("/live", express.static(path.join(mediaRoot, "live"), {
+      fallthrough: true,
+      setHeaders(res, filePath) {
+        if (filePath.endsWith(".m3u8")) {
+          res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        } else if (filePath.endsWith(".ts")) {
+          res.setHeader("Content-Type", "video/mp2t");
+          res.setHeader("Cache-Control", "public, max-age=60");
+        }
+      },
+    }));
+    app.use("/live", (req, res) => res.status(404).send("not found"));
+    const port = (Number(process.env.MEDIA_PORT) || 8000) + HLS_PORT_OFFSET;
+    const host = process.env.MEDIA_BIND || "0.0.0.0";
+    hlsStaticServer = app.listen(port, host, () => {
+      console.log(`[live][hls] static server on http://${host}:${port}/live/<key>/index.m3u8 (root ${mediaRoot})`);
+    });
+    hlsStaticServer.on("error", (err) => {
+      console.error("[live][hls] static server error:", err.message);
+    });
+  } catch (err) {
+    console.error("[live][hls] static server failed to start:", err.message);
+  }
+  return hlsStaticServer;
+}
+/* Phase 31.1: HLS base URL — the static server lives on MEDIA_PORT+1.
+ * MEDIA_BASE_URL historically pointed at the NMS FLV port (:8000), which
+ * never served m3u8/TS, so every LAN playback URL 404'd. Derive the HLS
+ * port from the configured base (bump trailing :8000 -> :8001, else
+ * append the offset port) so stored playbackUrl values are fetchable.
+ * The RTMP ingest key is never embedded anywhere else — playback URLs
+ * carry only the path; the key stays server-side. */
+function hlsBaseUrl() {
+  const base = String(ingest.mediaBaseUrl || "").replace(/\/+$/, "");
+  const m = base.match(/^(https?:\/\/[^/:]+)(?::(\d+))?(\/.*)?$/i);
+  if (!m) return base;
+  const [, origin, port, rest] = m;
+  const mediaPort = Number(process.env.MEDIA_PORT) || 8000;
+  const hlsPort = mediaPort + HLS_PORT_OFFSET;
+  if (port && Number(port) === mediaPort) return `${origin}:${hlsPort}${rest || ""}`;
+  if (!port) return `${origin}:${hlsPort}${rest || ""}`;
+  return base;
+}
+/* NOTE: startHlsStaticServer is exported at the bottom with the other
+ * exports (after `nms` exists) — do NOT export here; `module.exports = nms`
+ * below would wipe early assignments. */
 
 const trans = ingest.ffmpegPath
   ? {
@@ -197,7 +269,10 @@ nms.on("postPublish", async (first, second) => {
           isLive: true,
           startedAt: stream.startedAt || new Date(),
           endedAt: null,
-          playbackUrl: `${ingest.mediaBaseUrl}/live/${streamKey}/index.m3u8`,
+          playbackUrl: `${hlsBaseUrl()}/live/${streamKey}/index.m3u8`,
+          /* Phase 31.1: playbackUrl always targets the HLS static server
+           * (MEDIA_PORT+1); legacy MEDIA_BASE_URL values pointing at the NMS
+           * FLV port would otherwise 404. hlsBaseUrl() normalizes. */
           playbackStatus: ingest.ffmpegReady ? "preparing" : "failed",
           playbackError: ingest.ffmpegReady
             ? ""
@@ -364,11 +439,20 @@ module.exports.extractStreamKey = extractStreamKey;
 module.exports.redactKey = redactKey;
 module.exports.rejectSession = rejectSession;
 
+module.exports.startHlsStaticServer = startHlsStaticServer;
+module.exports.hlsStaticPort = () => (Number(process.env.MEDIA_PORT) || 8000) + HLS_PORT_OFFSET;
+/* Phase 31.1: auto-start the HLS static server on require (when this module
+ * is the live media server). Test seams that require this file get delivery
+ * too; startHlsStaticServer is idempotent. Disable with HLS_STATIC=0. */
+if (process.env.HLS_STATIC !== "0") {
+  try { startHlsStaticServer(); } catch (_e) { /* logged inside */ }
+}
 /* Phase 31: graceful shutdown stops packagers (never orphan ffmpeg). */
 for (const sig of ["SIGINT", "SIGTERM"]) {
   try {
     process.on(sig, () => {
       try { stopAll(); } catch (_e) { /* ignore */ }
+      try { if (hlsStaticServer) hlsStaticServer.close(); } catch (_e) { /* ignore */ }
     });
   } catch (_e) { /* ignore */ }
 }
@@ -387,6 +471,23 @@ function getPlaybackState(stream) {
     return out;
   }
   if (!stream.isLive) return out;
+  /* Phase 31.1: a dead ffmpeg must surface as failed (with its sanitized
+   * stderr tail) instead of preparing forever. */
+  try {
+    const { describePackagingFailure } = require("./hlsPackager");
+    const failure = describePackagingFailure(stream.streamKey);
+    if (failure) {
+      out.playbackStatus = "failed";
+      out.playbackError = failure;
+      if (stream.playbackStatus !== "failed") {
+        LiveStream.updateOne(
+          { _id: stream._id },
+          { $set: { playbackStatus: "failed", playbackError: failure } }
+        ).catch(() => {});
+      }
+      return out;
+    }
+  } catch (_e) { /* ignore — fall through to disk probe */ }
   if (stream.playbackStatus === "failed") return out;
   const probe = isPlaybackReady(mediaRoot, stream.streamKey);
   out.playbackReady = probe.ready;
