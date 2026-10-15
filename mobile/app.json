@@ -48,7 +48,6 @@
         }
       ],
       "expo-video",
-      "expo-nodemediaclient",
       [
         "expo-camera",
         {

@@ -1,32 +1,36 @@
 /*
- * Phase 30.2 — native mobile RTMP publish capability probe (Expo Go safe).
+ * Phase 32 — native mobile RTMP publish capability probe (Expo Go safe).
  *
  * Detection semantics (Expo documented):
  * - Constants.appOwnership === "expo"  -> running inside Expo Go: return
  *   unavailable WITHOUT touching require(), so the missing native module can
  *   never throw into React rendering.
  * - null / anything else -> development build, standalone, or web: attempt the
- *   guarded require("expo-nodemediaclient") and report honestly. Available only
- *   when the NodePublisher export is actually present and usable.
+ *   guarded require("expo-live-stream") and report honestly. Available only
+ *   when the ExpoLiveStreamPublisherView export is actually present and usable.
  *
- * Technology decision: expo-nodemediaclient (NodeMedia NodePublisher) is the
- * native module that publishes the device camera + microphone to the existing
- * NodeMediaServer RTMP ingest on Expo SDK 56. expo-camera alone can only
- * preview/record locally — it cannot publish an RTMP stream.
+ * Technology decision: expo-live-stream (MIT; Android publishing uses the
+ * open-source RootEncoder library) is the native module that publishes the
+ * device camera + microphone to the existing NodeMediaServer RTMP ingest on
+ * Expo SDK 56. expo-camera alone can only preview/record locally — it cannot
+ * publish an RTMP stream.
  *
- * Verified API (expo-nodemediaclient 0.2.11):
- *   <NodePublisher ref url frontCamera volume videoParam audioParam
- *     videoOrientation onEventCallback style />
- *   ref.start(publishUrl) / ref.stop()
- *   NodePublisher.NMC_CODEC_ID_H264 / NMC_CODEC_ID_AAC / NMC_PROFILE_AUTO /
- *     VIDEO_ORIENTATION_PORTRAIT
- * Mic mute = volume 0 / 1 (no separate mic prop).
+ * Verified API (expo-live-stream 1.3.1):
+ *   <ExpoLiveStreamPublisherView ref url quality frontCamera
+ *     videoWidth videoHeight videoBitrate videoFps audioBitrate audioSampleRate
+ *     onConnectionSuccess onConnectionFailed onDisconnect onStreamStateChanged
+ *     onBitrateUpdate style />
+ *   ref.start(publishUrl) / ref.stop() / ref.switchCamera() / ref.toggleMute()
+ * Preview runs on mount WITHOUT publishing (RootEncoder startPreview in
+ * tryInitCamera); publishing starts only when ref.start(url) is called, so a
+ * single mounted view serves as both pre-live preview and publisher — no
+ * competing camera ownership, no preview/publisher swap.
  *
- * Expo Go safety (Phase 30.1):
- * - This file NEVER imports expo-nodemediaclient at module scope. Metro would
+ * Expo Go safety (Phase 30.1, preserved):
+ * - This file NEVER imports expo-live-stream at module scope. Metro would
  *   otherwise evaluate the package entry, whose top level calls
- *   requireNativeModule('ExpoNodeMediaClientModule') and throws
- *   "Cannot find native module 'ExpoNodeMediaClientModule'" in Expo Go.
+ *   requireNativeModule('ExpoLiveStream') and throws
+ *   "Cannot find native module 'ExpoLiveStream'" in Expo Go.
  * - In Expo Go (Constants.appOwnership === 'expo') this module returns a
  *   deterministic `{ available: false }` WITHOUT touching require() at all,
  *   so no native-module failure can escape into React rendering.
@@ -56,7 +60,7 @@ function isExpoGo() {
 }
 
 function unavailable(reason) {
-  return { available: false, NodePublisher: null, reason };
+  return { available: false, PublisherView: null, NodePublisher: null, reason };
 }
 
 let cached = null;
@@ -76,17 +80,16 @@ export function getNativePublishCapability() {
     // Lazy + guarded: only non-Expo-Go environments reach here.
     // Direct destructured require keeps Metro from evaluating the native entry
     // at module scope; any missing-native-module error is caught below.
-    // eslint-disable-next-line
-    const mod = require("expo-nodemediaclient");
-    const NodePublisher =
-      mod?.NodePublisher ||
-      mod?.default?.NodePublisher ||
+    const mod = require("expo-live-stream");
+    const PublisherView =
+      mod?.ExpoLiveStreamPublisherView ||
+      mod?.default?.ExpoLiveStreamPublisherView ||
       null;
     // Usable only when the export exists and looks like a component.
-    if (!NodePublisher || (typeof NodePublisher !== "function" && typeof NodePublisher !== "object")) {
-      throw new Error("NodePublisher export missing or unusable");
+    if (!PublisherView || (typeof PublisherView !== "function" && typeof PublisherView !== "object")) {
+      throw new Error("ExpoLiveStreamPublisherView export missing or unusable");
     }
-    cached = { available: true, NodePublisher, reason: "" };
+    cached = { available: true, PublisherView, reason: "" };
   } catch (err) {
     // Honest unavailable: preserve the native error for diagnostics, never
     // fake broadcasting and never let the error crash React rendering.
@@ -97,48 +100,25 @@ export function getNativePublishCapability() {
 }
 
 /** Guarded loader for the start-live path (dev builds only). Never throws. */
-export function loadNodePublisher() {
+export function loadPublisherView() {
   try {
     const cap = getNativePublishCapability();
-    return cap && cap.available ? cap.NodePublisher : null;
+    return cap && cap.available ? (cap.PublisherView || cap.NodePublisher || null) : null;
   } catch {
     return null;
   }
 }
 
-/* Phase 31.1 — license registration (legitimate config only, never secrets).
- * NodeMedia's native publisher ships with LICENSE_KEY = "" and documents
- * contacting nodemedia.cn for per-platform codes. Without a key the SDK
- * still connects audio (AAC) but drops/never starts the H264 track — exactly
- * the field finding (FFprobe: AAC only). Wire the documented setLicense()
- * path so operators CAN register keys via env/app config:
- *   EXPO_PUBLIC_NODEMEDIA_ANDROID_LICENSE / EXPO_PUBLIC_NODEMEDIA_IOS_LICENSE
- * or app.json extra. No key is hardcoded or committed — when unset this is
- * a no-op and the UI surfaces the honest audio-only risk. */
+/** Back-compat alias (Phase 30–31 call sites). */
+export function loadNodePublisher() {
+  return loadPublisherView();
+}
+
+/* Phase 32 — no license registration: expo-live-stream/RootEncoder is MIT
+ * open-source and needs no per-platform key. Kept as a no-op shim so older
+ * call sites keep working; always reports not-applicable. */
 export function registerNodeMediaLicense() {
-  try {
-    if (isExpoGo()) return { registered: false, reason: "expo-go" };
-    // eslint-disable-next-line
-    const mod = require("expo-nodemediaclient");
-    const NodeMediaClient = mod?.NodeMediaClient || mod?.default?.NodeMediaClient || null;
-    if (!NodeMediaClient || typeof NodeMediaClient.setLicense !== "function") {
-      return { registered: false, reason: "no-setLicense" };
-    }
-    const { Platform } = require("react-native");
-    let key = "";
-    try {
-      const Constants = require("expo-constants").default || require("expo-constants");
-      const extra = Constants?.expoConfig?.extra || Constants?.manifest?.extra || {};
-      key = Platform.OS === "ios"
-        ? (process.env.EXPO_PUBLIC_NODEMEDIA_IOS_LICENSE || extra.nodeMediaIosLicense || "")
-        : (process.env.EXPO_PUBLIC_NODEMEDIA_ANDROID_LICENSE || extra.nodeMediaAndroidLicense || "");
-    } catch { key = ""; }
-    if (!key) return { registered: false, reason: "no-license-configured" };
-    NodeMediaClient.setLicense(String(key));
-    return { registered: true, reason: "" };
-  } catch (err) {
-    return { registered: false, reason: (err && err.message) || "license-failed" };
-  }
+  return { registered: false, reason: "not-applicable-open-source" };
 }
 
 /* RTMP publish URL: server URL + /live/ + stream key (never shown to user).

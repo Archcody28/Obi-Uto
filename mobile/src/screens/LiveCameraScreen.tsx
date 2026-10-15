@@ -27,20 +27,23 @@ import {
   buildPublishUrl,
   describePublishUrl,
   getNativePublishCapability,
-  loadNodePublisher,
-  registerNodeMediaLicense,
+  loadPublisherView,
 } from "../services/livePublishService";
 
 /*
  * Phase 30 — Live Camera Preview (Facebook/YouTube-mobile style).
- * Real camera preview -> Start Live -> native RTMP publish (NodePublisher)
+ * Real camera preview -> Start Live -> native RTMP publish
  * -> poll owner status until real ingest flips isLive=true. No fake live.
  *
- * Phase 30.6 — expo-nodemediaclient has NO preview-without-publish mode: the
- * camera only activates once publisher.start(publishUrl) is called. So the
- * pre-live preview is an expo-camera CameraView (facing/mirror mirror the
- * publisher props); on Start Live the preview unmounts FIRST, releasing the
- * camera, then NodePublisher mounts and starts. Never both at once.
+ * Phase 32 — expo-live-stream (MIT, RootEncoder on Android) replaces the paid
+ * client publisher. Unlike the old SDK, the native view runs the camera
+ * preview on mount WITHOUT publishing (RootEncoder startPreview in
+ * tryInitCamera) and only publishes after ref.start(publishUrl). A single
+ * mounted ExpoLiveStreamPublisherView therefore serves as BOTH the pre-live
+ * preview and the publisher: no CameraView/publisher swap, no competing
+ * camera ownership, no remount-kills-socket hazard. expo-camera is kept only
+ * for permission hooks (and as an Expo Go fallback preview, where the native
+ * publisher cannot exist).
  */
 
 function sanitizePublishError(msg) {
@@ -83,15 +86,19 @@ export default function LiveCameraScreen() {
   const [starting, setStarting] = useState(false);
   const [ending, setEnding] = useState(false);
   const [ended, setEnded] = useState(false);
-  /* Phase 30.6: preview vs publisher ownership. Only one camera consumer may
-   * be mounted at a time. "preview" -> CameraView; "connecting"/"live" ->
-   * NodePublisher. publishUrl is staged in a ref (never in state/logs). */
+  /* Phase 32: single native view owns the camera for its whole lifetime.
+   * The ExpoLiveStreamPublisherView previews on mount and publishes after
+   * ref.start(url), so it stays mounted from the preview phase through live.
+   * publishUrl is staged in a ref (never in state/logs). Flip calls
+   * ref.switchCamera(), mute calls ref.toggleMute() — both are live native
+   * operations, never remounts. */
   const [publisherActive, setPublisherActive] = useState(false);
   const publishUrlRef = useRef(null);
+  const [previewMounted, setPreviewMounted] = useState(false);
 
   /* Phase 30.1: resolve the native-publisher capability once, never letting a
      native-module failure escape into rendering. Expo Go gets a deterministic
-     unavailable result; dev builds load NodePublisher via the guarded path. */
+     unavailable result; dev builds load the view via the guarded path. */
   const capability = useMemo(() => {
     try {
       const cap = getNativePublishCapability();
@@ -99,28 +106,24 @@ export default function LiveCameraScreen() {
     } catch {}
     return {
       available: false,
-      NodePublisher: null,
+      PublisherView: null,
+      NodePublisher: null, // back-compat key for older capability readers
       reason:
         "Live broadcasting needs a custom development build with the native publisher. " +
         "Expo Go cannot broadcast camera RTMP.",
     };
   }, []);
-  const NodePublisher = capability.NodePublisher;
+  const PublisherViewComp = capability.PublisherView || capability.NodePublisher || null;
+  const LivePublisher = PublisherViewComp;
   const publisherRef = useRef(null);
   /* Phase 31.1: intentional-stop gate. Native `disconnect` events arriving
    * AFTER requestStop("user-end-live") are normal lifecycle, never errors. */
   const expectDisconnectRef = useRef(false);
-  const [licenseNote, setLicenseNote] = useState("");
-  useEffect(() => {
-    try {
-      const r = registerNodeMediaLicense();
-      if (r && !r.registered && r.reason === "no-license-configured") {
-        setLicenseNote(
-          "No NodeMedia license configured — if viewers hear audio but see no video, register per-platform license codes (contact nodemedia.cn) via EXPO_PUBLIC_NODEMEDIA_*_LICENSE."
-        );
-      }
-    } catch {}
-  }, []);
+  /* Phase 32: native mute/camera sync refs — declared with all other hooks
+   * (never after an early return). switchCamera()/toggleMute() are native
+   * imperative calls; refs prevent double-toggles across re-renders. */
+  const mutedNativeRef = useRef(false);
+  const frontNativeRef = useRef(false);
   const pollRef = useRef(null);
   const heartbeatRef = useRef(null);
   const mountedRef = useRef(true);
@@ -321,9 +324,13 @@ export default function LiveCameraScreen() {
     /* Phase 30.1: the native publisher is (re)loaded only inside this guarded
        start path. Expo Go resolves to null here and exits with the
        development-build message — never a native-module crash. */
-    const Publisher = loadNodePublisher();
-    if (!capability.available || !NodePublisher || !Publisher) {
+    const Publisher = loadPublisherView();
+    if (!capability.available || !LivePublisher || !Publisher) {
       Alert.alert("Development build required", capability.reason);
+      return;
+    }
+    if (!previewMounted || !publisherRef.current?.start) {
+      Alert.alert("Camera warming up", "The camera preview is still starting. Wait a moment, then tap Start Live again.");
       return;
     }
     setStarting(true);
@@ -350,49 +357,34 @@ export default function LiveCameraScreen() {
       setPhase("connecting");
       stopReasonRef.current = null; // fresh attempt clears the previous stop reason
       expectDisconnectRef.current = false; // fresh attempt: disconnects are errors again
-      /* Phase 30.6: stage the URL, hand camera ownership to the publisher:
-       * unmount CameraView first (single setState), start AFTER mount via the
-       * publisher-ready effect below. publishUrl lives only in a ref — never
-       * in state, logs, or error text. */
+      /* Phase 32: single-view model — the publisher view is ALREADY mounted
+       * (previewing). Keep the URL in a ref only, mark publishing active, and
+       * start the native RTMP stream directly. No mount swap, no second start
+       * effect. Key never in state/logs/error text. */
       publishUrlRef.current = publishUrl;
       setPublisherActive(true);
+      console.log("[live] publisher start requested");
+      try {
+        publisherRef.current?.start?.(publishUrl);
+      } catch (startErr) {
+        publishUrlRef.current = null;
+        setPublisherActive(false);
+        setPhase("preview");
+        throw startErr;
+      }
+      console.log("[live] publisher start dispatched");
+      startHeartbeat(String(streamId));
       setStarting(false);
       pollForLive(String(streamId), Date.now() + 30000);
     } catch (err) {
       setStarting(false);
       setPhase("preview");
-      setPublisherActive(false);
+      if (!liveRef.current) setPublisherActive(false);
       publishUrlRef.current = null;
       const raw = err?.response?.data?.message || err?.message || "Could not start publishing.";
       setError(sanitizePublishError(raw));
     }
   };
-
-  /* Phase 30.6: start the native publisher once it has mounted (camera already
-   * released by the unmounted CameraView). URL/error sanitized — key never shown. */
-  useEffect(() => {
-    if (!publisherActive || !streamId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const url = publishUrlRef.current;
-        if (!url) throw new Error("Ingest unavailable");
-        console.log("[live] publisher start requested");
-        await publisherRef.current?.start?.(url);
-        if (cancelled) return;
-        console.log("[live] publisher start resolved");
-        startHeartbeat(String(streamId));
-      } catch (err) {
-        if (cancelled || !mountedRef.current) return;
-        setPublisherActive(false);
-        publishUrlRef.current = null;
-        setPhase("preview");
-        setError(sanitizePublishError(err?.message || "Could not start publishing."));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [publisherActive]);
 
   const finishEndedUi = useCallback((message) => {
     /* Phase 30.6: single consistent teardown — timers cleared, publisher
@@ -493,6 +485,53 @@ export default function LiveCameraScreen() {
     ]);
   };
 
+  /* Phase 32: keep native mute/camera in sync via imperative calls (the new
+   * view exposes switchCamera()/toggleMute(); flip/mute state lives in React).
+   * Declared BEFORE any early return — hooks must run unconditionally. */
+  useEffect(() => {
+    try {
+      if (previewMounted && publisherRef.current?.toggleMute && muted !== mutedNativeRef.current) {
+        publisherRef.current.toggleMute();
+        mutedNativeRef.current = muted;
+        console.log(`[live] mic ${muted ? "muted" : "unmuted"}`);
+      }
+    } catch {}
+  }, [muted, previewMounted]);
+  useEffect(() => {
+    try {
+      if (previewMounted && publisherRef.current?.switchCamera && frontCamera !== frontNativeRef.current) {
+        publisherRef.current.switchCamera();
+        frontNativeRef.current = frontCamera;
+        console.log(`[live] camera flipped to ${frontCamera ? "front" : "back"}`);
+      }
+    } catch {}
+  }, [frontCamera, previewMounted]);
+
+  const handleNativeDisconnect = useCallback(() => {
+    /* Intentional-stop disconnects are NORMAL lifecycle — gate FIRST. */
+    if (expectDisconnectRef.current || stopReasonRef.current) {
+      console.log("[live] publisher disconnect after intentional stop (normal lifecycle)");
+      return;
+    }
+    if (mountedRef.current && (liveRef.current || publisherActive)) {
+      setError("Publish connection lost. Check connection, then retry.");
+      requestStop("native-disconnect");
+      if (mountedRef.current) setPhase("preview");
+    }
+  }, [publisherActive, requestStop]);
+
+  const handleNativeFailed = useCallback((rawMsg) => {
+    if (expectDisconnectRef.current || stopReasonRef.current) {
+      console.log("[live] publisher failure after intentional stop (normal lifecycle)");
+      return;
+    }
+    const safe = sanitizePublishError(rawMsg || "Could not start publishing.");
+    console.log(`[live] native publisher event: ${safe}`);
+    if (mountedRef.current) setError(`Publish error: ${safe}`);
+    requestStop(`native-event:${safe.slice(0, 80)}`);
+    if (mountedRef.current && !liveRef.current) setPhase("preview");
+  }, [requestStop]);
+
   if (!streamId) {
     return (
       <View style={styles.state}>
@@ -503,84 +542,61 @@ export default function LiveCameraScreen() {
 
   const pillColor = live ? "#E0245E" : ended ? "#1B7A3D" : "#141414";
   const pillLabel = live ? "LIVE" : ended || phase === "ended" ? "ENDED" : phase === "connecting" ? "CONNECTING" : "PREVIEW";
-  /* Phase 30.6 render contract: exactly one camera consumer mounted.
-   * preview phase -> CameraView (real pre-live preview, needs only expo-camera
-   * permissions); connecting/live -> NodePublisher (owns the camera). */
-  const showPublisher = publisherActive && capability.available && NodePublisher && hasPermissions;
-  const showPreview = !publisherActive && hasPermissions;
+
+
+  /* Phase 32 render contract: ONE native view owns the camera for its whole
+   * lifetime (preview on mount + publish after ref.start). Expo CameraView
+   * is used ONLY as an Expo Go fallback preview. NEVER mount both at once. */
+  const showNativePublisher = capability.available && LivePublisher && hasPermissions && !ended;
+  const showExpoGoPreview = !showNativePublisher && hasPermissions && !ended;
 
   return (
     <View style={styles.container}>
       <View style={styles.cameraWrap}>
-        {showPublisher ? (
+        {showNativePublisher ? (
           <>
-            {/* Phase 30.5: NO key={frontCamera} — remounting NodePublisher
-                mid-publish kills the RTMP socket (the ~15s "mystery" drop when
-                a re-render flips the key). frontCamera is a live prop. */}
-            <NodePublisher
-            ref={publisherRef}
-            style={styles.camera}
-            frontCamera={frontCamera}
-            cameraFrontMirror
-            volume={muted ? 0 : 1}
-            videoParam={{
-              codecid: NodePublisher.NMC_CODEC_ID_H264,
-              /* Phase 31.1: BASELINE profile — widest HW-encoder support on
-               * Android. PROFILE_AUTO negotiated High on some devices, whose
-               * output ffmpeg/libx264 HLS packaging rejected, surfacing as
-               * audio-only playlists. 720x1280 portrait matches the preview. */
-              profile: NodePublisher.NMC_PROFILE_H264_BASELINE,
-              width: 720,
-              height: 1280,
-              fps: 30,
-              bitrate: 2000000,
-            }}
-            audioParam={{
-              codecid: NodePublisher.NMC_CODEC_ID_AAC,
-              profile: NodePublisher.NMC_PROFILE_AAC_LC,
-              samplingRate: 44100,
-              channels: 1,
-              bitrate: 64000,
-            }}
-            videoOrientation={NodePublisher.VIDEO_ORIENTATION_PORTRAIT}
-            keyFrameInterval={2}
-            HWAccelEnable
-            denoiseEnable={false}
-            onEventCallback={(event) => {
-              const nativeEvent = event?.nativeEvent;
-              const msg = nativeEvent?.msg;
-              const evt = Number(nativeEvent?.event);
-              /* Phase 31.1: intentional-stop disconnects are NORMAL lifecycle.
-               * Field finding: End Live briefly surfaced a native disconnect
-               * as a publishing error. Gate FIRST — never show errors after
-               * the user (or remote-end) asked for stop. */
-              const msgLower = String(msg || "").toLowerCase();
-              const looksLikeDisconnect =
-                evt === 0 || msgLower.includes("disconnect") || msgLower.includes("stop") || msgLower.includes("close");
-              if (looksLikeDisconnect && (expectDisconnectRef.current || stopReasonRef.current)) {
-                console.log("[live] publisher disconnect after intentional stop (normal lifecycle)");
-                return;
-              }
-              /* Phase 30.5: log every native publisher event/result so a
-               * server- or socket-side drop is distinguishable from a
-               * client-initiated stop. Reasons are first-wins via requestStop.
-               * Phase 30.6: native text is SANITIZED — it may embed the full
-               * publish URL/key (the screenshot leak). */
-              if (msg && typeof msg === "string") {
-                const safe = sanitizePublishError(msg);
-                console.log(`[live] native publisher event: ${safe}`);
-                if (/fail|error|denied|disconnect|close/i.test(msg)) {
-                  if (mountedRef.current) setError(`Publish error: ${safe}`);
-                  requestStop(`native-event:${safe.slice(0, 80)}`);
+            {/* Phase 32: single ExpoLiveStreamPublisherView = preview + publisher.
+                720x1280 portrait @2Mbps H264 + 64k AAC matches the FFmpeg HLS
+                packager expectation. NO key={} — remounting mid-publish kills
+                the RTMP socket. frontCamera is set once at mount; later flips
+                go through ref.switchCamera() via the sync effect above. */}
+            <LivePublisher
+              ref={publisherRef}
+              style={styles.camera}
+              frontCamera={frontCamera}
+              videoWidth={720}
+              videoHeight={1280}
+              videoBitrate={2000000}
+              videoFps={30}
+              audioBitrate={64000}
+              audioSampleRate={44100}
+              onLayout={() => {
+                if (!previewMounted) {
+                  setPreviewMounted(true);
+                  console.log("[live] publisher preview mounted");
                 }
-              }
-            }}
-          />
+              }}
+              onConnectionSuccess={() => {
+                console.log("[live] native publisher connected");
+              }}
+              onStreamStateChanged={(event) => {
+                const state = event?.nativeEvent?.state;
+                if (state) console.log(`[live] native stream state: ${state}`);
+                if (state === "failed" || state === "auth_error") handleNativeFailed(state);
+                else if (state === "disconnected") handleNativeDisconnect();
+              }}
+              onConnectionFailed={(event) => {
+                handleNativeFailed(event?.nativeEvent?.msg);
+              }}
+              onDisconnect={() => {
+                handleNativeDisconnect();
+              }}
+            />
           </>
-        ) : showPreview ? (
-          /* Phase 30.6: real pre-live camera preview. expo-camera owns the
-           * camera here; it unmounts before NodePublisher mounts on Start Live
-           * so the two never compete. Flip/mute mirror the publisher props. */
+        ) : showExpoGoPreview ? (
+          /* Phase 32: Expo Go fallback preview only — CameraView owns the
+           * camera here because the native publisher cannot exist in Expo Go.
+           * In dev builds the native view above handles both preview+publish. */
           <CameraView
             style={styles.camera}
             facing={frontCamera ? "front" : "back"}
@@ -633,7 +649,6 @@ export default function LiveCameraScreen() {
         )}
       </View>
       {!!error && <Text style={styles.error}>{error}</Text>}
-      {!!licenseNote && !error && <Text style={styles.hint}>{licenseNote}</Text>}
       <View style={styles.controls}>
         <TouchableOpacity style={styles.controlButton} onPress={() => setFrontCamera((v) => !v)}>
           <Text style={styles.controlText}>Flip</Text>

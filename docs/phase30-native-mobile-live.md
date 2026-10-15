@@ -5,16 +5,22 @@ camera preview -> Start Live -> viewers watch -> End Live.
 
 ## Broadcasting technology
 
-**`expo-nodemediaclient` (`NodePublisher`)** — selected because:
+**`expo-live-stream` (`ExpoLiveStreamPublisherView`, MIT — Android publishing
+via the open-source RootEncoder library)** — selected for Phase 32 because:
 
-- It is the NodeMedia native publisher path for Expo SDK 56 (same vendor as
-  the existing `node-media-server` RTMP ingest), so the phone publishes
-  `rtmp://<host>:1935/live/<streamKey>` exactly like OBS did — the existing
-  `postPublish -> isLive=true` lifecycle stays authoritative.
+- It publishes to the existing `node-media-server` RTMP ingest, so the phone
+  publishes `rtmp://<host>:1935/live/<streamKey>` exactly like OBS did — the
+  existing `postPublish -> isLive=true` lifecycle stays authoritative.
 - `expo-camera` alone can only preview/record locally; it cannot publish RTMP.
-- Verified API (0.2.11): `<NodePublisher ref url frontCamera volume
-  videoParam audioParam videoOrientation onEventCallback />`,
-  `ref.start(publishUrl)` / `ref.stop()`, mic mute via `volume 0/1`.
+- The native view previews on mount WITHOUT publishing (RootEncoder
+  `startPreview`), so one mounted view serves as both pre-live preview and
+  publisher — no competing camera ownership, no preview/publisher swap.
+- Verified API (1.3.1): `<ExpoLiveStreamPublisherView ref frontCamera
+  videoWidth videoHeight videoBitrate videoFps audioBitrate audioSampleRate
+  onConnectionSuccess onConnectionFailed onDisconnect onStreamStateChanged
+  onBitrateUpdate />`, `ref.start(publishUrl)` / `ref.stop()` /
+  `ref.switchCamera()` / `ref.toggleMute()`.
+- No license key: replaces the paid NodeMedia client (Phase 31.1 and earlier).
 
 ## Dev build requirement (Expo Go NOT supported for broadcasting)
 
@@ -29,8 +35,11 @@ npx expo run:android     # or: npx expo run:ios
 # alternative: eas build --profile development
 ```
 
-`app.json` already wires `expo-camera` (permissions), `expo-nodemediaclient`,
-Android `CAMERA/RECORD_AUDIO/INTERNET`, and iOS camera/mic usage strings.
+`app.json` wires `expo-camera` (permissions); `expo-live-stream` ships no
+config plugin so it is intentionally absent from `app.json` plugin list.
+Install still pulls the native module for dev builds:
+`npm i expo-live-stream`. Android `CAMERA/RECORD_AUDIO/INTERNET`, and
+iOS camera/mic usage strings remain in `app.json`.
 
 ## Creator flow
 
@@ -38,8 +47,9 @@ Android `CAMERA/RECORD_AUDIO/INTERNET`, and iOS camera/mic usage strings.
    (`expo-image-picker`), Create Stream.
 2. Server `POST /api/live-streams` creates the waiting stream.
 3. App navigates to `/live-camera?streamId=...`.
-4. Camera screen requests camera+mic, shows the real `NodePublisher` camera
-   preview, flip + mute controls, title/thumbnail overlay.
+4. Camera screen requests camera+mic, shows the real native publisher camera
+   preview (single view = preview + publisher), flip + mute controls,
+   title/thumbnail overlay.
 5. Start Live: owner-only `GET /ingest/:id` (key never shown), `POST
    /mobile-signal/:id {publishing}`, `ref.start(publishUrl)`, heartbeat every
    15s, poll `GET /status/:id` every 2s (30s timeout). LIVE badge + duration +

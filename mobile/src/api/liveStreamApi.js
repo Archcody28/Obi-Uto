@@ -2,8 +2,8 @@ import client
   from "./client";
 
 /*
- * Phase 30 — live streaming API (mobile-first, RTMP ingest stays backend-only).
- * Technology: expo-nodemediaclient (NodePublisher) publishes the device
+ * Phase 32 — live streaming API (mobile-first, RTMP ingest stays backend-only).
+ * Technology: expo-live-stream (MIT, RootEncoder on Android) publishes the device
  * camera straight to the existing NodeMediaServer ingest; the creator never
  * sees a stream key. Requires a custom dev build (native module, no Expo Go).
  * Stream keys are returned ONLY by /mine and /ingest/:id, which require an

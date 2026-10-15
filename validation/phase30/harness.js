@@ -92,8 +92,8 @@ async function main() {
   const plugins = appText;
 
   record(
-    "camera screen uses native NodePublisher start/stop",
-    camSrc.includes("NodePublisher") &&
+    "camera screen uses native publisher start/stop",
+    (camSrc.includes("ExpoLiveStreamPublisherView") || camSrc.includes("NodePublisher")) &&
       camSrc.includes(".start?.(") &&
       camSrc.includes(".stop?.()"),
     ""
@@ -115,7 +115,7 @@ async function main() {
   );
   record(
     "publish service lazy-loads native module (Expo Go safe)",
-    svcSrc.includes("expo-nodemediaclient") && svcSrc.includes("available: false"),
+    svcSrc.includes("expo-live-stream") && svcSrc.includes("available: false"),
     ""
   );
   record(

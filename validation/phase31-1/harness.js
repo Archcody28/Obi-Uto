@@ -73,8 +73,8 @@ async function main() {
   record("packager failure described", /ffmpeg exited/.test(desc), desc.slice(0, 80));
   record("failure text leaks no key", !desc.includes(A), "");
   pack.stopAll({ logger: quiet });
-  record("publisher baseline profile", camSrc.includes("NMC_PROFILE_H264_BASELINE"), "");
-  record("license via config", svcSrc.includes("registerNodeMediaLicense") && svcSrc.includes("setLicense"), "");
+  record("publisher baseline profile (720p H264 + AAC)", camSrc.includes("videoWidth={720}") && camSrc.includes("videoHeight={1280}") && camSrc.includes("audioBitrate={64000}"), "");
+  record("open-source publisher, no license key", svcSrc.includes("expo-live-stream") && !/setLicense|EXPO_PUBLIC_NODEMEDIA|nodeMediaIosLicense|nodeMediaAndroidLicense/.test(svcSrc), "");
   record("intentional-stop disconnect normal", camSrc.includes("expectDisconnectRef") && camSrc.includes("normal lifecycle"), "");
   record("End Live intentional stop", camSrc.includes('requestStop("user-end-live")'), "");
   record("public strips streamKey", ctlSrc.includes("delete obj.streamKey"), "");
